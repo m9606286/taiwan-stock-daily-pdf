@@ -34,16 +34,16 @@ def send_line_broadcast(pdf_url):
         print(f"LINE 發送失敗，狀態碼：{response.status_code}，回應：{response.text}")
 
 # 2. 呼叫 Claude API 整理新聞並生成 PDF
-def generate_pdf():
-    client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+#def generate_pdf():
+ #   client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
     
-    prompt = "請整理今日台股重點新聞，並輸出為帶有簡潔美觀 CSS 樣式的完整 HTML 碼..."
+  #  prompt = "請整理今日台股重點新聞，並輸出為帶有簡潔美觀 CSS 樣式的完整 HTML 碼..."
     
-    response = client.messages.create(
-        model="claude-3-7-sonnet-20250219",
-        max_tokens=3000,
-        messages=[{"role": "user", "content": prompt}]
-    )
+   # response = client.messages.create(
+    #    model="claude-3-7-sonnet-20250219",
+     #   max_tokens=3000,
+      #  messages=[{"role": "user", "content": prompt}]
+    #)
     
     html_content = response.content[0].text
     HTML(string=html_content).write_pdf("daily_report.pdf")
