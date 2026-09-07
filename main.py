@@ -1,5 +1,6 @@
 import os
 import time
+import re
 import datetime
 import requests
 import feedparser
@@ -8,8 +9,7 @@ from google.genai import errors
 from weasyprint import HTML
 
 def fetch_latest_stock_news():
-    """1. 自動上網抓取 Google News 過去 24 小時內的最新台股焦點新聞"""
-    # 關鍵修正：加入 when:1d 參數，限定只抓取過去 24 小時內的即時新聞
+    """1. 自動抓取 Google News 過去 24 小時內的最新台股焦點新聞"""
     rss_url = "https://news.google.com/rss/search?q=台股+當日焦點+when:1d&hl=zh-TW&gl=TW&ceid=TW:zh-Hant"
     feed = feedparser.parse(rss_url)
     
@@ -17,7 +17,6 @@ def fetch_latest_stock_news():
     for entry in feed.entries[:8]:
         news_titles.append(entry.title)
     
-    # 備援機制：如果極端情況下當天完全沒新聞，退回抓一般搜尋
     if not news_titles:
         backup_url = "https://news.google.com/rss/search?q=台股+焦點&hl=zh-TW&gl=TW&ceid=TW:zh-Hant"
         feed = feedparser.parse(backup_url)
@@ -27,7 +26,7 @@ def fetch_latest_stock_news():
     return news_titles
 
 def generate_report_content(news_titles):
-    """2. 將新聞餵給 Gemini 生成深度分析內文（帶入今日日期，避免 AI 產生舊時間幻想）"""
+    """2. 將新聞餵給 Gemini 生成深度分析內文"""
     client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
     
     today_str = datetime.date.today().strftime("%Y 年 %m 月 %d 日")
@@ -45,11 +44,11 @@ def generate_report_content(news_titles):
 三、【後續操作觀察與風險提示】
 
 【注意事項】：
-1. 必須嚴格基於上述提供的新聞內容進行分析，切勿混入非相關或過期的歷史行情（例如幾年前的點位或舊月份）。
-2. 請全部使用繁體中文呈現，用語精煉專業，重點明確。
+1. 輸出時請盡量使用純文字或清晰段落，避免使用過多的 * 或 #### 符號。
+2. 必須嚴格基於上述提供的新聞內容進行分析，切勿混入過期的歷史行情。
+3. 全部使用繁體中文呈現，用語精煉專業。
 """
     
-    # 關閉 AFC 警告提示
     config = {
         "automatic_function_calling": {"disable": True}
     }
@@ -70,10 +69,23 @@ def generate_report_content(news_titles):
             else:
                 raise e
 
+def clean_markdown_text(text):
+    """助手函數：清除文字中殘留的 *, **, #### 符號，轉換為乾淨純文字"""
+    text = re.sub(r'#{1,6}\s*', '', text)  # 去除 #, ##, ### 等標題符號
+    text = re.sub(r'\*\*(.*?)\*\*', r'\1', text)  # 去除粗體 **
+    text = re.sub(r'\*(.*?)\*', r'\1', text)      # 去除斜體/強調 *
+    text = re.sub(r'^\s*[\*\-]\s+', '• ', text, flags=re.MULTILINE) # 統一清單符號為圓點
+    return text.strip()
+
 def create_pdf(news_titles, ai_analysis):
-    """3. 將「新聞清單」與「AI 分析」組合繪製成高級排版的 PDF 晨報"""
+    """3. 高級立體視覺與配色設計 PDF 生成"""
     today_str = datetime.date.today().strftime("%Y/%m/%d")
-    news_li_html = "".join([f"<li>{title}</li>" for title in news_titles])
+    
+    # 清理標題與分析內文的雜訊符號
+    cleaned_news = [clean_markdown_text(title) for title in news_titles]
+    cleaned_analysis = clean_markdown_text(ai_analysis)
+    
+    news_li_html = "".join([f"<li><span class='bullet-icon'>◆</span><span class='news-text'>{title}</span></li>" for title in cleaned_news])
     
     html_content = f"""
     <!DOCTYPE html>
@@ -83,86 +95,128 @@ def create_pdf(news_titles, ai_analysis):
         <style>
             @page {{
                 size: A4;
-                margin: 15mm 12mm;
-                background-color: #f8fafc;
+                margin: 12mm;
+                background-color: #f1f5f9;
             }}
             * {{ box-sizing: border-box; }}
             body {{
                 font-family: "Noto Sans CJK TC", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
                 margin: 0;
                 padding: 0;
-                color: #2d3748;
-                font-size: 10.5pt;
-                line-height: 1.6;
+                color: #1e293b;
+                font-size: 10pt;
+                line-height: 1.65;
             }}
+            
+            /* 頂部雙色立體 Banner */
             .header {{
-                background-color: #1a365d;
+                background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%);
                 color: #ffffff;
-                padding: 20px 15mm;
-                margin: -15mm -12mm 20px -12mm;
+                padding: 22px 25px;
+                border-radius: 12px;
+                margin-bottom: 18px;
+                box-shadow: 0 8px 16px rgba(30, 58, 138, 0.25);
+                position: relative;
             }}
             .header h1 {{
                 margin: 0;
-                font-size: 18pt;
-                font-weight: bold;
-                letter-spacing: 1px;
+                font-size: 20pt;
+                font-weight: 700;
+                letter-spacing: 1.5px;
+                text-shadow: 0 2px 4px rgba(0,0,0,0.2);
             }}
-            .header .subtitle {{
-                font-size: 10pt;
-                color: #cbd5e0;
-                margin-top: 5px;
+            .header .subtitle-badge {{
+                display: inline-block;
+                background: rgba(255, 255, 255, 0.2);
+                padding: 4px 12px;
+                border-radius: 20px;
+                font-size: 9pt;
+                color: #f8fafc;
+                margin-top: 8px;
+                border: 1px solid rgba(255, 255, 255, 0.3);
             }}
+
+            /* 質感卡片區塊 */
             .section {{
                 background: #ffffff;
-                border-radius: 8px;
-                padding: 18px 20px;
-                margin-bottom: 18px;
+                border-radius: 10px;
+                padding: 18px 22px;
+                margin-bottom: 16px;
+                box-shadow: 0 4px 12px rgba(15, 23, 42, 0.06);
                 border: 1px solid #e2e8f0;
             }}
+            
+            /* 具備立體色塊指示條的標題 */
             .section-title {{
                 font-size: 12pt;
-                color: #2b6cb0;
-                border-left: 4px solid #3182ce;
-                padding-left: 10px;
+                font-weight: 700;
+                color: #0f172a;
                 margin-top: 0;
-                margin-bottom: 12px;
+                margin-bottom: 14px;
+                padding-left: 12px;
+                border-left: 5px solid #2563eb;
+                display: flex;
+                align-items: center;
             }}
-            ul {{
+            
+            /* 新聞清單樣式 */
+            ul.news-list {{
+                list-style: none;
                 margin: 0;
-                padding-left: 20px;
+                padding: 0;
             }}
-            li {{
+            ul.news-list li {{
+                padding: 8px 12px;
                 margin-bottom: 6px;
+                background: #f8fafc;
+                border-radius: 6px;
+                border-left: 3px solid #cbd5e1;
+                font-size: 9.5pt;
             }}
+            ul.news-list li .bullet-icon {{
+                color: #2563eb;
+                font-size: 8pt;
+                margin-right: 8px;
+            }}
+            
+            /* AI 分析文樣式 */
             .content {{
                 white-space: pre-wrap;
+                color: #334155;
+                font-size: 10pt;
+                background: #fafafa;
+                padding: 14px 16px;
+                border-radius: 8px;
+                border: 1px dashed #cbd5e1;
             }}
+
+            /* 頁尾 */
             .footer {{
-                margin-top: 25px;
-                font-size: 9pt;
-                color: #a0aec0;
+                margin-top: 20px;
+                font-size: 8.5pt;
+                color: #64748b;
                 text-align: center;
+                padding-top: 10px;
                 border-top: 1px solid #e2e8f0;
-                padding-top: 12px;
             }}
         </style>
     </head>
     <body>
         <div class="header">
             <h1>每日台股焦點與趨勢晨報</h1>
-            <div class="subtitle">自動化生成報告｜日期：{today_str}｜Gemini AI 彙整</div>
+            <div class="subtitle-badge">📊 自動化即時彙整｜日期：{today_str}</div>
         </div>
 
         <div class="section">
-            <h2 class="section-title">今日焦點新聞摘要</h2>
-            <ul>
+            <div class="section-title">即時焦點新聞摘要</div>
+            <ul class="news-list">
                 {news_li_html}
             </ul>
         </div>
 
         <div class="section">
-            <h2 class="section-title">AI 分析與市場深度剖析</h2>
-            <div class="content">{ai_analysis}</div>
+            <div class="section-title">Gemini AI 市場深度剖析</div>
+            <div class="content">{cleaned_analysis}</div>
         </div>
 
         <div class="footer">
@@ -176,7 +230,7 @@ def create_pdf(news_titles, ai_analysis):
     return pdf_path
 
 def send_line_broadcast(text_content):
-    """4. 透過 LINE 發送精華摘要與 GitHub Raw PDF 下載連結"""
+    """4. 透過 LINE 發送精華摘要與 JSDelivr CDN PDF 連結"""
     line_token = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
     url = "https://api.line.me/v2/bot/message/broadcast"
     
@@ -186,8 +240,10 @@ def send_line_broadcast(text_content):
     }
     
     today_str = datetime.date.today().strftime("%Y/%m/%d")
-    pdf_url = "https://raw.githubusercontent.com/m9606286/taiwan-stock-daily-pdf/main/taiwan_stock_daily.pdf"
-    preview_text = text_content[:800] + "..." if len(text_content) > 800 else text_content
+    clean_preview = clean_markdown_text(text_content)
+    
+    pdf_url = "https://cdn.jsdelivr.net/gh/m9606286/taiwan-stock-daily-pdf@main/taiwan_stock_daily.pdf"
+    preview_text = clean_preview[:800] + "..." if len(clean_preview) > 800 else clean_preview
     
     payload = {
         "messages": [
@@ -208,9 +264,7 @@ if __name__ == "__main__":
     print("開始執行每日台股晨報自動化流程...")
     
     news_list = fetch_latest_stock_news()
-    print(f"已抓取當日焦點新聞（共 {len(news_list)} 則）：")
-    for news in news_list:
-        print(f" - {news}")
+    print(f"已抓取當日焦點新聞（共 {len(news_list)} 則）。")
     
     analysis = generate_report_content(news_list)
     print("Gemini 分析完畢。")
