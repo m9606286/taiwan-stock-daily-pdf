@@ -1,5 +1,6 @@
 import os
 import time
+import datetime
 import requests
 import feedparser
 from google import genai
@@ -7,23 +8,33 @@ from google.genai import errors
 from weasyprint import HTML
 
 def fetch_latest_stock_news():
-    """1. 自動上網抓取 Google News 最新台股焦點新聞"""
-    rss_url = "https://news.google.com/rss/search?q=台股+當日焦點&hl=zh-TW&gl=TW&ceid=TW:zh-Hant"
+    """1. 自動上網抓取 Google News 過去 24 小時內的最新台股焦點新聞"""
+    # 關鍵修正：加入 when:1d 參數，限定只抓取過去 24 小時內的即時新聞
+    rss_url = "https://news.google.com/rss/search?q=台股+當日焦點+when:1d&hl=zh-TW&gl=TW&ceid=TW:zh-Hant"
     feed = feedparser.parse(rss_url)
     
     news_titles = []
     for entry in feed.entries[:8]:
         news_titles.append(entry.title)
     
+    # 備援機制：如果極端情況下當天完全沒新聞，退回抓一般搜尋
+    if not news_titles:
+        backup_url = "https://news.google.com/rss/search?q=台股+焦點&hl=zh-TW&gl=TW&ceid=TW:zh-Hant"
+        feed = feedparser.parse(backup_url)
+        for entry in feed.entries[:8]:
+            news_titles.append(entry.title)
+
     return news_titles
 
 def generate_report_content(news_titles):
-    """2. 將新聞餵給 Gemini 生成深度分析內文（含網路異常與 503 自動重試）"""
+    """2. 將新聞餵給 Gemini 生成深度分析內文（帶入今日日期，避免 AI 產生舊時間幻想）"""
     client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
     
+    today_str = datetime.date.today().strftime("%Y 年 %m 月 %d 日")
     news_text = "\n".join([f"- {title}" for title in news_titles])
     
     prompt = f"""
+今天是 {today_str}。
 以下是今日剛發布的台股重點即時新聞標題：
 {news_text}
 
@@ -33,7 +44,9 @@ def generate_report_content(news_titles):
 二、【熱門族群與重點個股動態】
 三、【後續操作觀察與風險提示】
 
-請全部使用繁體中文呈現，用語精煉專業，重點明確。
+【注意事項】：
+1. 必須嚴格基於上述提供的新聞內容進行分析，切勿混入非相關或過期的歷史行情（例如幾年前的點位或舊月份）。
+2. 請全部使用繁體中文呈現，用語精煉專業，重點明確。
 """
     
     # 關閉 AFC 警告提示
@@ -58,7 +71,8 @@ def generate_report_content(news_titles):
                 raise e
 
 def create_pdf(news_titles, ai_analysis):
-    """3. 將「新聞清單」與「AI 分析」組合繪製成高級排版的 PDF 晨報（適配 Linux/Windows 思源黑體）"""
+    """3. 將「新聞清單」與「AI 分析」組合繪製成高級排版的 PDF 晨報"""
+    today_str = datetime.date.today().strftime("%Y/%m/%d")
     news_li_html = "".join([f"<li>{title}</li>" for title in news_titles])
     
     html_content = f"""
@@ -74,7 +88,6 @@ def create_pdf(news_titles, ai_analysis):
             }}
             * {{ box-sizing: border-box; }}
             body {{
-                /* 關鍵：設定對應 apt-get install fonts-noto-cjk 的思源黑體，解決亂碼問題 */
                 font-family: "Noto Sans CJK TC", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
                 margin: 0;
                 padding: 0;
@@ -137,7 +150,7 @@ def create_pdf(news_titles, ai_analysis):
     <body>
         <div class="header">
             <h1>每日台股焦點與趨勢晨報</h1>
-            <div class="subtitle">自動化生成報告｜Gemini AI 彙整</div>
+            <div class="subtitle">自動化生成報告｜日期：{today_str}｜Gemini AI 彙整</div>
         </div>
 
         <div class="section">
@@ -172,6 +185,7 @@ def send_line_broadcast(text_content):
         "Authorization": f"Bearer {line_token}"
     }
     
+    today_str = datetime.date.today().strftime("%Y/%m/%d")
     pdf_url = "https://raw.githubusercontent.com/m9606286/taiwan-stock-daily-pdf/main/taiwan_stock_daily.pdf"
     preview_text = text_content[:800] + "..." if len(text_content) > 800 else text_content
     
@@ -179,7 +193,7 @@ def send_line_broadcast(text_content):
         "messages": [
             {
                 "type": "text",
-                "text": f"【台股每日晨報】\n\n{preview_text}\n\n📄 點此下載完整排版 PDF：\n{pdf_url}"
+                "text": f"【台股每日晨報 - {today_str}】\n\n{preview_text}\n\n📄 點此下載完整排版 PDF：\n{pdf_url}"
             }
         ]
     }
@@ -194,7 +208,9 @@ if __name__ == "__main__":
     print("開始執行每日台股晨報自動化流程...")
     
     news_list = fetch_latest_stock_news()
-    print("已抓取當日焦點新聞。")
+    print(f"已抓取當日焦點新聞（共 {len(news_list)} 則）：")
+    for news in news_list:
+        print(f" - {news}")
     
     analysis = generate_report_content(news_list)
     print("Gemini 分析完畢。")
