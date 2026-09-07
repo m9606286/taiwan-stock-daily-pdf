@@ -18,7 +18,7 @@ def fetch_latest_stock_news():
     return news_titles
 
 def generate_report_content(news_titles):
-    """2. 將新聞餵給 Gemini 3.6 Flash 生成深度分析內文（含 503 重試機制）"""
+    """2. 將新聞餵給 Gemini 生成深度分析內文（含網路異常與 503 自動重試）"""
     client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
     
     news_text = "\n".join([f"- {title}" for title in news_titles])
@@ -36,28 +36,29 @@ def generate_report_content(news_titles):
 請全部使用繁體中文呈現，用語精煉專業，重點明確。
 """
     
-    for attempt in range(3):
+    # 關閉 AFC 警告提示
+    config = {
+        "automatic_function_calling": {"disable": True}
+    }
+
+    max_retries = 5
+    for attempt in range(max_retries):
         try:
             response = client.models.generate_content(
                 model="gemini-3.6-flash",
-                contents=prompt
+                contents=prompt,
+                config=config
             )
             return response.text
-        except errors.APIError as e:
-            if "503" in str(e) or "UNAVAILABLE" in str(e):
-                print(f"Gemini API 繁忙 (503)，等待 5 秒後進行第 {attempt + 1} 次重試...")
+        except Exception as e:
+            print(f"API 請求失敗 ({e})，5 秒後進行第 {attempt + 1}/{max_retries} 次重試...")
+            if attempt < max_retries - 1:
                 time.sleep(5)
             else:
                 raise e
-                
-    response = client.models.generate_content(
-        model="gemini-3.6-flash",
-        contents=prompt
-    )
-    return response.text
 
 def create_pdf(news_titles, ai_analysis):
-    """3. 將「新聞清單」與「AI 分析」組合繪製成高級排版的 PDF 晨報"""
+    """3. 將「新聞清單」與「AI 分析」組合繪製成高級排版的 PDF 晨報（適配 Linux/Windows 思源黑體）"""
     news_li_html = "".join([f"<li>{title}</li>" for title in news_titles])
     
     html_content = f"""
@@ -73,7 +74,8 @@ def create_pdf(news_titles, ai_analysis):
             }}
             * {{ box-sizing: border-box; }}
             body {{
-                font-family: "Noto Sans CJK TC", "PingFang TC", "Microsoft JhengHei", sans-serif;
+                /* 關鍵：設定對應 apt-get install fonts-noto-cjk 的思源黑體，解決亂碼問題 */
+                font-family: "Noto Sans CJK TC", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
                 margin: 0;
                 padding: 0;
                 color: #2d3748;
