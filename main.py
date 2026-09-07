@@ -9,11 +9,10 @@ from google.genai import errors
 from weasyprint import HTML
 
 def fetch_latest_stock_news():
-    """1. 以新聞『實際發布時間』做硬性判定：嚴格只抓今天清晨 (00:00 ~ 07:00) 發出的新聞"""
-    rss_url = "https://news.google.com/rss/search?q=site:money.udn.com+(台股+OR+美股+OR+夜盤+OR+ADR)&hl=zh-TW&gl=TW&ceid=TW:zh-Hant"
+    """抓取今日清晨新聞"""
+    rss_url = "https://news.google.com/rss/search?q=site:money.udn.com+(台股+OR+美股+OR+夜盤+OR+ADR+OR+半導體+OR+AI)&hl=zh-TW&gl=TW&ceid=TW:zh-Hant"
     feed = feedparser.parse(rss_url)
     
-    # 取得今天的日期與時間 (台灣時間 UTC+8)
     tz_tw = datetime.timezone(datetime.timedelta(hours=8))
     now_tw = datetime.datetime.now(tz_tw)
     today_date = now_tw.date()
@@ -24,39 +23,33 @@ def fetch_latest_stock_news():
         if not hasattr(entry, 'published_parsed') or not entry.published_parsed:
             continue
             
-        # 將 RSS 內文的新聞發布時間轉為 UTC，再轉換為台灣時間 (UTC+8)
         pub_utc_epoch = time.mktime(entry.published_parsed)
         pub_tw_dt = datetime.datetime.fromtimestamp(pub_utc_epoch, tz=datetime.timezone.utc).astimezone(tz_tw)
         
-        # 【核心時間判定】：
-        # 1. 必須是今天 (today_date) 發布的新聞
-        # 2. 發布時間必須小於 7 點 (發布時間在 00:00 ~ 06:59 之間)
         if pub_tw_dt.date() == today_date and pub_tw_dt.hour < 7:
             if entry.title not in clean_titles:
                 clean_titles.append(entry.title)
             
-        if len(clean_titles) >= 10:
+        if len(clean_titles) >= 12:
             break
 
-    # 備援機制：若是清晨新聞極少，自動抓取「過去 8 小時內」的新聞遞補
-    if len(clean_titles) < 3:
+    if len(clean_titles) < 5:
         for entry in feed.entries:
             if not hasattr(entry, 'published_parsed') or not entry.published_parsed:
                 continue
             pub_utc_epoch = time.mktime(entry.published_parsed)
             pub_tw_dt = datetime.datetime.fromtimestamp(pub_utc_epoch, tz=datetime.timezone.utc).astimezone(tz_tw)
             
-            # 時間差在 8 小時以內
-            if (now_tw - pub_tw_dt).total_seconds() <= 8 * 3600:
+            if (now_tw - pub_tw_dt).total_seconds() <= 12 * 3600:
                 if entry.title not in clean_titles:
                     clean_titles.append(entry.title)
-            if len(clean_titles) >= 10:
+            if len(clean_titles) >= 12:
                 break
 
     return clean_titles
 
 def generate_report_content(news_titles):
-    """2. 將清晨最新新聞餵給 Gemini 進行含美股與台股夜盤的深度分析"""
+    """Gemini 深度剖析 Prompt"""
     client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
     
     today_str = datetime.date.today().strftime("%Y 年 %m 月 %d 日")
@@ -64,33 +57,34 @@ def generate_report_content(news_titles):
     
     prompt = f"""
 今天是 {today_str}。
-以下是從《經濟日報》抓取今日清晨（00:00-07:00）最新發布的頭條新聞（包含昨晚美股、台股夜盤與總經動向）：
+以下是今日清晨最新發布的財經頭條新聞：
 {news_text}
 
-請扮演一位資深的台股首席策略分析師，針對上述新聞進行跨市場綜合解讀與深度精闢剖析。
+請扮演資深台股首席策略分析師，生成一份【極其詳細、內容豐富且條理分明】的盤前深度分析報告。
 
-請務必包含以下四大區塊：
-一、【昨晚美股三大指數與台股夜盤動向解讀】
-重點分析昨晚美股三大指數（道瓊、那斯達克、標普500）以及台指期夜盤表現、科技股/台積電ADR走勢與資金避險情緒。
+請嚴格包含以下五大核心區塊：
+一、【美股夜盤與國際市場脈動解讀】
+詳細分析昨晚美股四大指數、台指期夜盤表現、台積電 ADR 走勢與科技股帶動效應。
 
-二、【台股今日開盤盤勢預判與熱門族群】
-根據昨晚外盤表現，評估今日台股開盤氣氛、關鍵支撐壓力區間，以及焦點族群（如半導體、AI概念股、重電傳產等）。
+二、【台股今日盤勢預判與關鍵點位】
+預估今日台股開盤走勢、振幅區間、關鍵支撐位與壓力位分析。
 
-三、【關鍵總經數據與潛在觀望風險】
-提煉當前國際匯率、油價、美債殖利率或即將公布的總經數據風險點。
+三、【焦點產業族群與重點關注個股】
+詳細剖析今日值得關注的核心產業（如 AI 伺服器、先進封裝 CoWoS、重電綠能等），並列出代表性個股與利多背景。
 
-四、【今日資產配置與具體操作思維】
-給予投資人明確、具體的開盤進出場與風控應對建議。
+四、【總經數據、匯率與外資資產動向】
+分析美債殖利率、美元指數、新台幣匯率走勢及外資動向。
+
+五、【實戰操作策略與風險控管指南】
+給予投資人明確具體的開盤應對思維與止損止盈風控機制。
 
 【注意事項】：
-1. 嚴格禁止使用任何橫線（如 ---）、* 號、# 號或任何 Markdown 符號。
-2. 內文段落標題請直接寫成 一、【昨晚美股...】 形式。
-3. 語氣精練專業，注重跨市場邏輯推演，全部使用繁體中文呈現。
+1. 嚴格禁止使用任何 Markdown 橫線（---）、* 號、# 號。
+2. 段落標題請直接寫成 一、【...】 形式。
+3. 語氣專業精練，全部使用繁體中文。
 """
     
-    config = {
-        "automatic_function_calling": {"disable": True}
-    }
+    config = {"automatic_function_calling": {"disable": True}}
 
     max_retries = 5
     for attempt in range(max_retries):
@@ -102,14 +96,13 @@ def generate_report_content(news_titles):
             )
             return response.text
         except Exception as e:
-            print(f"API 請求失敗 ({e})，5 秒後進行第 {attempt + 1}/{max_retries} 次重試...")
+            print(f"API 請求失敗 ({e})，5 秒後重試...")
             if attempt < max_retries - 1:
                 time.sleep(5)
             else:
                 raise e
 
 def clean_markdown_text(text):
-    """助手函數：徹底濾除 ---, ***, *, # 等所有雜亂符號"""
     text = re.sub(r'^[-\*_]{2,}\s*$', '', text, flags=re.MULTILINE)
     text = re.sub(r'#{1,6}\s*', '', text)
     text = re.sub(r'\*\*(.*?)\*\*', r'\1', text)
@@ -118,12 +111,11 @@ def clean_markdown_text(text):
     return text.strip()
 
 def format_analysis_html(raw_text):
-    """將分析內文標題自動轉換為帶有 3D 立體徽章與高質感漸層方框的 HTML"""
     cleaned = clean_markdown_text(raw_text)
     lines = cleaned.split("\n")
     formatted_lines = []
     
-    icons = ["🇺🇸 🌙", "📈 💎", "⚠️ 📊", "🎯 💡"]
+    icons = ["🇺🇸", "📈", "⚡", "💵", "🛡️"]
     icon_idx = 0
 
     for line in lines:
@@ -133,30 +125,20 @@ def format_analysis_html(raw_text):
         if re.match(r'^[一二三四五六七八九十]、\s*【.*】', line_str) or re.match(r'^【.*】', line_str):
             current_icon = icons[icon_idx % len(icons)]
             icon_idx += 1
-            formatted_lines.append(f'''
-            <div class="header-3d-box">
-                <span class="box-icon-3d">{current_icon}</span>
-                <span class="box-title-text">{line_str}</span>
-            </div>
-            ''')
+            formatted_lines.append(f'<div class="block-title">{current_icon} {line_str}</div>')
+        elif "操作思維" in line_str or "風險控管" in line_str or "操作策略" in line_str:
+            formatted_lines.append(f'<div class="callout-box">💡 {line_str}</div>')
         else:
-            formatted_lines.append(f'<p class="content-p">{line_str}</p>')
+            formatted_lines.append(f'<p class="block-text">{line_str}</p>')
             
     return "".join(formatted_lines)
 
 def create_pdf(news_titles, ai_analysis):
-    """3. 生成包含美股夜盤視覺卡片、多圖案與立體方框的高質感 PDF"""
+    """生成高級感手機專用 PDF"""
     today_str = datetime.date.today().strftime("%Y/%m/%d")
-    
     cleaned_news = [clean_markdown_text(title) for title in news_titles]
     
-    news_li_html = "".join([f'''
-    <div class="news-3d-card">
-        <div class="news-bullet">🔹</div>
-        <div class="news-title">{title}</div>
-    </div>
-    ''' for title in cleaned_news])
-    
+    news_li_html = "".join([f'<div class="news-item"><span class="dot"></span>{title}</div>' for title in cleaned_news])
     formatted_analysis_html = format_analysis_html(ai_analysis)
     
     html_content = f"""
@@ -166,202 +148,212 @@ def create_pdf(news_titles, ai_analysis):
         <meta charset="utf-8">
         <style>
             @page {{
-                size: A4;
-                margin: 8mm;
-                background-color: #f1f5f9;
+                size: 108mm 192mm;
+                margin: 6mm;
+                background-color: #0b1329;
             }}
             * {{ box-sizing: border-box; }}
             body {{
-                font-family: "Noto Sans CJK TC", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
+                font-family: "Noto Sans CJK TC", "Noto Sans TC", "PingFang TC", sans-serif;
                 margin: 0;
                 padding: 0;
-                color: #0f172a;
-                font-size: 14pt;
-                line-height: 1.85;
-            }}
-            
-            /* 頂部立體漸層 Header */
-            .header {{
-                background: linear-gradient(135deg, #0f172a 0%, #1e3a8a 50%, #2563eb 100%);
-                color: #ffffff;
-                padding: 24px 28px;
-                border-radius: 16px;
-                margin-bottom: 20px;
-                box-shadow: 0 10px 22px rgba(30, 58, 138, 0.35);
-                border-bottom: 4px solid #1d4ed8;
-            }}
-            .header h1 {{
-                margin: 0;
-                font-size: 24pt;
-                font-weight: 900;
-                letter-spacing: 1px;
-                text-shadow: 0 3px 6px rgba(0,0,0,0.3);
-            }}
-            .header .subtitle-badge {{
-                display: inline-block;
-                background: linear-gradient(135deg, #2563eb 0%, #3b82f6 100%);
-                padding: 6px 16px;
-                border-radius: 20px;
-                font-size: 11.5pt;
-                font-weight: bold;
-                color: #ffffff;
-                margin-top: 12px;
-                box-shadow: 0 4px 10px rgba(0,0,0,0.2);
-                border: 1px solid rgba(255, 255, 255, 0.3);
+                color: #e2e8f0;
+                font-size: 10pt;
+                line-height: 1.65;
+                background-color: #0b1329;
             }}
 
-            /* 3D 視覺數據指標卡片區 */
-            .market-quick-cards {{
-                display: flex;
-                justify-content: space-between;
-                margin-bottom: 20px;
-                gap: 10px;
-            }}
-            .metric-card {{
-                flex: 1;
-                background: linear-gradient(145deg, #ffffff, #f8fafc);
+            /* 頂部 Header：極簡科技感 */
+            .hero-card {{
+                background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
                 border-radius: 12px;
-                padding: 14px;
-                text-align: center;
-                box-shadow: 0 6px 14px rgba(15, 23, 42, 0.08);
-                border: 1px solid #cbd5e1;
-                border-top: 4px solid #2563eb;
-            }}
-            .metric-card .card-icon {{
-                font-size: 18pt;
-                margin-bottom: 4px;
-            }}
-            .metric-card .card-title {{
-                font-size: 11pt;
-                font-weight: 800;
-                color: #475569;
-            }}
-            .metric-card .card-status {{
-                font-size: 12.5pt;
-                font-weight: 900;
-                color: #1e3a8a;
-                margin-top: 4px;
-            }}
-
-            /* 白底立體卡片容器 */
-            .section {{
-                background: #ffffff;
-                border-radius: 16px;
-                padding: 22px;
-                margin-bottom: 20px;
-                box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08);
-                border: 1px solid #e2e8f0;
-            }}
-            
-            .section-main-title {{
-                font-size: 18pt;
-                font-weight: 900;
-                color: #1e3a8a;
-                margin-top: 0;
-                margin-bottom: 18px;
-                padding-left: 14px;
-                border-left: 7px solid #2563eb;
-            }}
-            
-            /* 新聞列表 3D 卡片 */
-            .news-3d-card {{
-                display: flex;
-                align-items: center;
-                background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%);
-                color: #ffffff;
-                padding: 12px 18px;
+                padding: 14px 16px;
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
                 margin-bottom: 10px;
-                border-radius: 10px;
-                box-shadow: 0 4px 10px rgba(37, 99, 235, 0.25);
-                border-bottom: 3px solid #1d4ed8;
             }}
-            .news-bullet {{
-                font-size: 12pt;
-                margin-right: 10px;
-            }}
-            .news-title {{
-                font-size: 13.5pt;
-                font-weight: 700;
-                line-height: 1.5;
-            }}
-            
-            /* 內文藍色立體 3D 方框（白字） */
-            .header-3d-box {{
-                background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%);
-                color: #ffffff;
-                padding: 14px 20px;
-                margin-top: 24px;
-                margin-bottom: 16px;
-                border-radius: 10px;
-                box-shadow: 0 6px 14px rgba(30, 58, 138, 0.35);
-                border-left: 6px solid #60a5fa;
-                border-bottom: 3px solid #1d4ed8;
-            }}
-            .box-icon-3d {{
+            .hero-title {{
                 font-size: 15pt;
-                margin-right: 8px;
-            }}
-            .box-title-text {{
-                font-size: 15.5pt;
-                font-weight: 900;
+                font-weight: 800;
+                margin: 0 0 6px 0;
+                color: #ffffff;
                 letter-spacing: 0.5px;
             }}
+            .tag-group {{ margin-top: 4px; }}
+            .badge {{
+                display: inline-block;
+                background: rgba(16, 185, 129, 0.15);
+                color: #34d399;
+                font-weight: 700;
+                font-size: 8pt;
+                padding: 2px 8px;
+                border-radius: 6px;
+                border: 1px solid rgba(52, 211, 153, 0.3);
+                margin-right: 4px;
+            }}
+            .badge-date {{
+                display: inline-block;
+                background: rgba(56, 189, 248, 0.15);
+                color: #38bdf8;
+                font-weight: 700;
+                font-size: 8pt;
+                padding: 2px 8px;
+                border-radius: 6px;
+                border: 1px solid rgba(56, 189, 248, 0.3);
+            }}
 
-            /* 大字體段落 */
-            .content-p {{
-                margin: 0 0 14px 0;
-                color: #334155;
-                font-size: 14pt;
-                line-height: 1.85;
+            /* 數據簡報矩陣 */
+            .metrics-grid {{
+                display: table;
+                width: 100%;
+                table-layout: fixed;
+                border-spacing: 6px;
+                margin-left: -6px;
+                margin-right: -6px;
+                margin-bottom: 8px;
+            }}
+            .metric-row {{ display: table-row; }}
+            .metric-col {{ display: table-cell; width: 50%; }}
+            
+            .metric-card {{
+                background: rgba(30, 41, 59, 0.5);
+                border-radius: 10px;
+                padding: 8px;
+                text-align: center;
+                border: 1px solid rgba(255, 255, 255, 0.05);
+                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            }}
+            .card-up {{ border-top: 2.5px solid #fb7185; }}
+            .card-flat {{ border-top: 2.5px solid #38bdf8; }}
+
+            .metric-label {{ font-size: 7.5pt; color: #94a3b8; font-weight: 600; }}
+            .metric-value {{ font-size: 10pt; font-weight: 800; margin-top: 2px; color: #f8fafc; }}
+
+            /* 內容卡片面板 */
+            .section-panel {{
+                background: rgba(15, 23, 42, 0.6);
+                border-radius: 12px;
+                padding: 12px;
+                margin-bottom: 10px;
+                border: 1px solid rgba(255, 255, 255, 0.08);
+            }}
+            
+            .section-title {{
+                color: #ffffff;
+                font-size: 10.5pt;
+                font-weight: 800;
+                padding-bottom: 6px;
+                margin-bottom: 8px;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            }}
+
+            /* 新聞列表 */
+            .news-item {{
+                background: rgba(30, 41, 59, 0.4);
+                padding: 7px 10px;
+                border-radius: 6px;
+                margin-bottom: 6px;
+                color: #cbd5e1;
+                font-size: 9pt;
+                font-weight: 500;
+            }}
+            .dot {{
+                display: inline-block;
+                width: 5px;
+                height: 5px;
+                background-color: #38bdf8;
+                border-radius: 50%;
+                margin-right: 6px;
+                vertical-align: middle;
+            }}
+
+            /* 分析內文 */
+            .block-title {{
+                font-size: 10pt;
+                font-weight: 800;
+                color: #38bdf8;
+                margin-top: 10px;
+                margin-bottom: 4px;
+            }}
+            .block-text {{
+                color: #94a3b8;
+                font-size: 9pt;
+                line-height: 1.6;
+                margin: 0 0 6px 0;
+            }}
+
+            /* 強調提示框 */
+            .callout-box {{
+                background: rgba(234, 179, 8, 0.1);
+                border: 1px solid rgba(234, 179, 8, 0.3);
+                border-radius: 8px;
+                padding: 8px 10px;
+                color: #fef08a;
+                font-size: 8.5pt;
+                font-weight: 600;
+                margin-top: 8px;
             }}
 
             .footer {{
-                margin-top: 25px;
-                font-size: 11pt;
-                color: #64748b;
                 text-align: center;
-                padding-top: 16px;
-                border-top: 2px dashed #cbd5e1;
+                font-size: 7.5pt;
+                color: #475569;
+                margin-top: 8px;
             }}
         </style>
     </head>
     <body>
-        <div class="header">
-            <h1>每日美股夜盤與台股趨勢晨報</h1>
-            <div class="subtitle-badge">📊 經濟日報即時源｜日期：{today_str}</div>
-        </div>
-
-        <!-- 3D 視覺數據指標快速卡 -->
-        <div class="market-quick-cards">
-            <div class="metric-card">
-                <div class="card-icon">🇺🇸</div>
-                <div class="card-title">美股三大指數</div>
-                <div class="card-status">夜盤連動解讀</div>
-            </div>
-            <div class="metric-card">
-                <div class="card-icon">🌙</div>
-                <div class="card-title">台指期夜盤</div>
-                <div class="card-status">開盤情緒參考</div>
-            </div>
-            <div class="metric-card">
-                <div class="card-icon">⚡</div>
-                <div class="card-title">台積電 ADR</div>
-                <div class="card-status">權值動能觀察</div>
+        <div class="hero-card">
+            <div class="hero-title">盤前極速總研</div>
+            <div class="tag-group">
+                <span class="badge">AI 智算</span>
+                <span class="badge-date">{today_str}</span>
             </div>
         </div>
 
-        <div class="section">
-            <div class="section-main-title">經濟日報清晨即時頭條</div>
+        <div class="metrics-grid">
+            <div class="metric-row">
+                <div class="metric-col">
+                    <div class="metric-card card-up">
+                        <div class="metric-label">美股四大指數</div>
+                        <div class="metric-value">多頭回升</div>
+                    </div>
+                </div>
+                <div class="metric-col">
+                    <div class="metric-card card-flat">
+                        <div class="metric-label">台指期夜盤</div>
+                        <div class="metric-value">高檔震盪</div>
+                    </div>
+                </div>
+            </div>
+            <div class="metric-row">
+                <div class="metric-col">
+                    <div class="metric-card card-up">
+                        <div class="metric-label">台積電 ADR</div>
+                        <div class="metric-value">強勢帶勁</div>
+                    </div>
+                </div>
+                <div class="metric-col">
+                    <div class="metric-card card-flat">
+                        <div class="metric-label">新台幣匯率</div>
+                        <div class="metric-value">資金觀察</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="section-panel">
+            <div class="section-title">📡 經濟日報精選頭條</div>
             {news_li_html}
         </div>
 
-        <div class="section">
-            <div class="section-main-title">Gemini 跨市場深度剖析</div>
+        <div class="section-panel">
+            <div class="section-title">🧠 Gemini 深度策略解讀</div>
             {formatted_analysis_html}
         </div>
 
         <div class="footer">
-            本報告由 GitHub Actions 自動抓取經濟日報即時新聞並經 Gemini AI 彙整生成｜僅供參考，不構成投資建議
+            GitHub Actions 自動化生成｜投資有風險，僅供參考
         </div>
     </body>
     </html>
@@ -371,7 +363,6 @@ def create_pdf(news_titles, ai_analysis):
     return pdf_path
 
 def send_line_broadcast(text_content):
-    """4. 透過 LINE 發送精簡訊息與 PDF 連結"""
     line_token = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
     url = "https://api.line.me/v2/bot/message/broadcast"
     
@@ -387,7 +378,7 @@ def send_line_broadcast(text_content):
         "messages": [
             {
                 "type": "text",
-                "text": f"📈 {today_short} 美股夜盤與台股晨報\n\n📄 點擊連結查看今日 AI 精闢分析 PDF 報告：\n{pdf_url}"
+                "text": f"📈 {today_short} 美股夜盤與台股晨報\n\n📄 點擊連結開啟手機專屬高質感 PDF 報告：\n{pdf_url}"
             }
         ]
     }
@@ -400,14 +391,10 @@ def send_line_broadcast(text_content):
 
 if __name__ == "__main__":
     print("開始執行每日台股晨報自動化流程...")
-    
     news_list = fetch_latest_stock_news()
     print(f"已抓取經濟日報今日清晨即時新聞（共 {len(news_list)} 則）。")
-    
     analysis = generate_report_content(news_list)
-    print("Gemini 精闢分析完畢。")
-    
+    print("Gemini 深度剖析完畢。")
     pdf_file = create_pdf(news_list, analysis)
-    print(f"PDF 晨報產出成功：{pdf_file}")
-    
+    print(f"PDF 晨報產出成功（精緻手機版）：{pdf_file}")
     send_line_broadcast(analysis)
