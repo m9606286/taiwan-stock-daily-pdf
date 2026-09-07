@@ -10,15 +10,13 @@ from weasyprint import HTML
 
 def fetch_latest_stock_news():
     """1. 自動抓取「經濟日報」過去 7 小時內的即時台股焦點新聞"""
-    # 限定來源為 money.udn.com (經濟日報)，時間限定 when:7h
     rss_url = "https://news.google.com/rss/search?q=site:money.udn.com+台股+when:7h&hl=zh-TW&gl=TW&ceid=TW:zh-Hant"
     feed = feedparser.parse(rss_url)
     
     news_titles = []
-    for entry in feed.entries[:10]:  # 擷取最多 10 則即時新聞
+    for entry in feed.entries[:10]:
         news_titles.append(entry.title)
     
-    # 備援機制：若清晨 7 小時內新聞較少，稍微放寬至 12 小時內的經濟日報
     if len(news_titles) < 3:
         backup_url = "https://news.google.com/rss/search?q=site:money.udn.com+台股+when:12h&hl=zh-TW&gl=TW&ceid=TW:zh-Hant"
         feed = feedparser.parse(backup_url)
@@ -38,25 +36,18 @@ def generate_report_content(news_titles):
 以下是從《經濟日報》抓取的近 7 小時內最新台股即時新聞標題：
 {news_text}
 
-請扮演一位資深的台股首席策略分析師與產業研究員，請不要只是條列新聞，而是將上述新聞進行 cross-reference（交叉比對與綜合歸納），進行非常精闢且有洞察力的深度分析。
+請扮演一位資深的台股首席策略分析師與產業研究員，將上述新聞進行 cross-reference（交叉比對與綜合歸納），進行非常精闢且有洞察力的深度分析。
 
 請務必包含以下四大區塊：
 一、【大盤總經與籌碼動向精闢解讀】
-分析整體市場氣氛、資金流向與大盤關鍵支撐/壓力位階預判。
-
 二、【熱門產業族群與關鍵個股深度剖析】
-針對新聞提及的重點個股或產業（如半導體、AI、傳產、電子零組件等），分析其基本面催化劑與短中線動能。
-
 三、【市場潛在風險與觀望指標】
-提煉目前市場未顯現或需警惕的風險點（如國際市場連動、匯率、總經數據發布等）。
-
 四、【今日操作策略與關鍵應對思維】
-給予投資人明確、具體的資產配置或進出場操作建議。
 
 【注意事項】：
-1. 分析必須精闢、具商業洞察，絕不能只是重述新聞標題。
-2. 完全不要使用 --- 分隔線、*、** 或 #### 符號。
-3. 嚴格基於上述提供的新聞內容進行分析，全部使用繁體中文呈現。
+1. 嚴格禁止使用任何破折號、橫線（如 ---）、* 號、# 號或任何 markdown 格式化標記。
+2. 內文段落標題請直接寫成 一、【大盤總經...】 形式即可。
+3. 全部使用繁體中文呈現，用語精煉專業。
 """
     
     config = {
@@ -80,16 +71,16 @@ def generate_report_content(news_titles):
                 raise e
 
 def clean_markdown_text(text):
-    """助手函數：徹底清除文字中殘留的 ---, *, **, #### 等 Markdown 符號"""
-    text = re.sub(r'^-{3,}\s*$', '', text, flags=re.MULTILINE) 
-    text = re.sub(r'#{1,6}\s*', '', text)                     
-    text = re.sub(r'\*\*(.*?)\*\*', r'\1', text)             
-    text = re.sub(r'\*(.*?)\*', r'\1', text)                 
-    text = re.sub(r'^\s*[\*\-]\s+', '', text, flags=re.MULTILINE) 
+    """助手函數：徹底濾除 ---, ***, *, # 等所有雜亂符號"""
+    text = re.sub(r'^[-\*_]{2,}\s*$', '', text, flags=re.MULTILINE) # 清除 ---, *** 等橫線
+    text = re.sub(r'#{1,6}\s*', '', text)                        # 清除 # 標題符號
+    text = re.sub(r'\*\*(.*?)\*\*', r'\1', text)                # 清除粗體 **
+    text = re.sub(r'\*(.*?)\*', r'\1', text)                    # 清除斜體 *
+    text = re.sub(r'^\s*[\*\-\•]\s+', '', text, flags=re.MULTILINE) # 清除條列符號
     return text.strip()
 
 def format_analysis_html(raw_text):
-    """將分析內文的大標題自動轉換為『藍色立體方框（白字）』風格的 HTML"""
+    """將分析內文標題自動加上高級立體 3D 方框"""
     cleaned = clean_markdown_text(raw_text)
     lines = cleaned.split("\n")
     formatted_lines = []
@@ -98,19 +89,33 @@ def format_analysis_html(raw_text):
         line_str = line.strip()
         if not line_str:
             continue
+        # 匹配 一、【...】、二、【...】 或類似的大段落標題
         if re.match(r'^[一二三四五六七八九十]、\s*【.*】', line_str) or re.match(r'^【.*】', line_str):
-            formatted_lines.append(f'<div class="blue-title-box">{line_str}</div>')
+            formatted_lines.append(f'''
+            <div class="3d-header-card">
+                <div class="3d-badge">✦</div>
+                <div class="3d-header-title">{line_str}</div>
+            </div>
+            ''')
         else:
             formatted_lines.append(f'<p class="content-p">{line_str}</p>')
             
     return "".join(formatted_lines)
 
 def create_pdf(news_titles, ai_analysis):
-    """3. 生成大字體與藍色立體方框設計的 PDF 報告"""
+    """3. 生成美觀立體、大字體的 PDF 晨報"""
     today_str = datetime.date.today().strftime("%Y/%m/%d")
     
     cleaned_news = [clean_markdown_text(title) for title in news_titles]
-    news_li_html = "".join([f"<div class='news-blue-box'>{title}</div>" for title in cleaned_news])
+    
+    # 焦點新聞改為高級立體藍色卡片，附帶立體標示圖案
+    news_li_html = "".join([f'''
+    <div class="news-card">
+        <div class="news-icon">🔷</div>
+        <div class="news-text">{title}</div>
+    </div>
+    ''' for title in cleaned_news])
+    
     formatted_analysis_html = format_analysis_html(ai_analysis)
     
     html_content = f"""
@@ -121,8 +126,8 @@ def create_pdf(news_titles, ai_analysis):
         <style>
             @page {{
                 size: A4;
-                margin: 10mm;
-                background-color: #f8fafc;
+                margin: 8mm;
+                background-color: #f1f5f9;
             }}
             * {{ box-sizing: border-box; }}
             body {{
@@ -130,94 +135,125 @@ def create_pdf(news_titles, ai_analysis):
                 margin: 0;
                 padding: 0;
                 color: #0f172a;
-                font-size: 13pt;
-                line-height: 1.8;
+                /* 大幅放大字體以優化手機閱讀 */
+                font-size: 14pt;
+                line-height: 1.85;
             }}
             
+            /* 頂部雙層 3D 大 Banner */
             .header {{
-                background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%);
+                background: linear-gradient(135deg, #0f172a 0%, #1e3a8a 50%, #2563eb 100%);
                 color: #ffffff;
-                padding: 24px;
-                border-radius: 12px;
-                margin-bottom: 20px;
-                box-shadow: 0 8px 18px rgba(30, 58, 138, 0.3);
+                padding: 26px 28px;
+                border-radius: 16px;
+                margin-bottom: 22px;
+                box-shadow: 0 10px 25px rgba(30, 58, 138, 0.35);
+                border-bottom: 4px solid #1d4ed8;
             }}
             .header h1 {{
                 margin: 0;
-                font-size: 22pt;
-                font-weight: 800;
-                letter-spacing: 1px;
-                text-shadow: 0 2px 4px rgba(0,0,0,0.25);
+                font-size: 24pt;
+                font-weight: 900;
+                letter-spacing: 1.5px;
+                text-shadow: 0 3px 6px rgba(0,0,0,0.4);
             }}
             .header .subtitle-badge {{
                 display: inline-block;
-                background: rgba(255, 255, 255, 0.25);
-                padding: 6px 14px;
+                background: linear-gradient(135deg, #2563eb 0%, #3b82f6 100%);
+                padding: 6px 16px;
                 border-radius: 20px;
-                font-size: 11pt;
+                font-size: 11.5pt;
+                font-weight: bold;
                 color: #ffffff;
-                margin-top: 10px;
-                border: 1px solid rgba(255, 255, 255, 0.4);
+                margin-top: 12px;
+                box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+                border: 1px solid rgba(255, 255, 255, 0.3);
             }}
 
+            /* 白底立體卡片容器 */
             .section {{
                 background: #ffffff;
-                border-radius: 12px;
-                padding: 22px;
-                margin-bottom: 20px;
-                box-shadow: 0 4px 14px rgba(15, 23, 42, 0.08);
+                border-radius: 16px;
+                padding: 24px;
+                margin-bottom: 22px;
+                box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08);
                 border: 1px solid #e2e8f0;
             }}
             
+            /* 區塊主標題 */
             .section-main-title {{
-                font-size: 16pt;
-                font-weight: 800;
+                font-size: 18pt;
+                font-weight: 900;
                 color: #1e3a8a;
                 margin-top: 0;
-                margin-bottom: 16px;
+                margin-bottom: 18px;
                 padding-left: 14px;
-                border-left: 6px solid #2563eb;
+                border-left: 7px solid #2563eb;
             }}
             
-            .news-blue-box {{
-                background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+            /* 新聞列表 3D 卡片 */
+            .news-card {{
+                display: flex;
+                align-items: center;
+                background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%);
                 color: #ffffff;
-                padding: 12px 18px;
-                margin-bottom: 10px;
-                border-radius: 8px;
-                font-size: 12.5pt;
-                font-weight: 600;
-                box-shadow: 0 4px 8px rgba(37, 99, 235, 0.25);
-                border-bottom: 3px solid #1e40af;
+                padding: 14px 18px;
+                margin-bottom: 12px;
+                border-radius: 10px;
+                box-shadow: 0 5px 12px rgba(37, 99, 235, 0.28);
+                border-bottom: 3px solid #1d4ed8;
             }}
-            
-            .blue-title-box {{
-                background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
-                color: #ffffff;
-                padding: 12px 18px;
-                margin-top: 22px;
-                margin-bottom: 14px;
-                border-radius: 8px;
+            .news-icon {{
                 font-size: 14pt;
-                font-weight: 800;
-                box-shadow: 0 4px 10px rgba(30, 64, 175, 0.3);
+                margin-right: 12px;
+            }}
+            .news-text {{
+                font-size: 13.5pt;
+                font-weight: 700;
+                line-height: 1.5;
+            }}
+            
+            /* 內文 3D 藍色立體標題方框（白字） */
+            .3d-header-card {{
+                background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%);
+                color: #ffffff;
+                padding: 14px 20px;
+                margin-top: 26px;
+                margin-bottom: 16px;
+                border-radius: 10px;
+                box-shadow: 0 6px 14px rgba(30, 58, 138, 0.35);
+                border-left: 6px solid #60a5fa;
+                border-bottom: 3px solid #1d4ed8;
+            }}
+            .3d-badge {{
+                display: inline-block;
+                color: #93c5fd;
+                margin-right: 8px;
+                font-size: 12pt;
+            }}
+            .3d-header-title {{
+                display: inline;
+                font-size: 15.5pt;
+                font-weight: 900;
                 letter-spacing: 0.5px;
             }}
 
+            /* 段落內文大字體 */
             .content-p {{
-                margin: 0 0 12px 0;
+                margin: 0 0 14px 0;
                 color: #334155;
-                font-size: 13pt;
-                line-height: 1.8;
+                font-size: 14pt;
+                line-height: 1.85;
             }}
 
+            /* 頁尾 */
             .footer {{
-                margin-top: 25px;
-                font-size: 10.5pt;
+                margin-top: 30px;
+                font-size: 11pt;
                 color: #64748b;
                 text-align: center;
-                padding-top: 14px;
-                border-top: 1px solid #cbd5e1;
+                padding-top: 16px;
+                border-top: 2px dashed #cbd5e1;
             }}
         </style>
     </head>
@@ -228,17 +264,17 @@ def create_pdf(news_titles, ai_analysis):
         </div>
 
         <div class="section">
-            <div class="section-main-title">經濟日報 7小時內即時新聞頭條</div>
+            <div class="section-main-title">經濟日報即時新聞頭條</div>
             {news_li_html}
         </div>
 
         <div class="section">
-            <div class="section-main-title">Gemini 首席策略分析</div>
+            <div class="section-main-title">Gemini 首席策略深度分析</div>
             {formatted_analysis_html}
         </div>
 
         <div class="footer">
-            本報告由 GitHub Actions 自動抓取經濟日報即時新聞並經 Gemini AI 深度彙整｜僅供參考，不構成投資建議
+            本報告由 GitHub Actions 自動抓取經濟日報即時新聞並經 Gemini AI 彙整生成｜僅供參考，不構成投資建議
         </div>
     </body>
     </html>
@@ -257,8 +293,7 @@ def send_line_broadcast(text_content):
         "Authorization": f"Bearer {line_token}"
     }
     
-    # 格式化為 M/D (例如: 9/7)
-    today_short = datetime.datetime.now().strftime("%-m/%-d") if hasattr(datetime.datetime.now(), 'strftime') else datetime.datetime.now().strftime("%m/%d").lstrip('0').replace('/0', '/')
+    today_short = datetime.datetime.now().strftime("%m/%d").lstrip('0').replace('/0', '/')
     pdf_url = "https://cdn.jsdelivr.net/gh/m9606286/taiwan-stock-daily-pdf@main/taiwan_stock_daily.pdf"
     
     payload = {
