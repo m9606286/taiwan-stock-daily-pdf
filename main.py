@@ -9,25 +9,54 @@ from google.genai import errors
 from weasyprint import HTML
 
 def fetch_latest_stock_news():
-    """1. 自動抓取「經濟日報」過去 8 小時內的美股、夜盤與台股即時新聞"""
-    # 搜尋條件包含美股、夜盤、台股，限定經濟日報 source
-    rss_url = "https://news.google.com/rss/search?q=site:money.udn.com+(台股+OR+美股+OR+夜盤)+when:8h&hl=zh-TW&gl=TW&ceid=TW:zh-Hant"
+    """1. 以新聞『實際發布時間』做硬性判定：嚴格只抓今天清晨 (00:00 ~ 07:00) 發出的新聞"""
+    rss_url = "https://news.google.com/rss/search?q=site:money.udn.com+(台股+OR+美股+OR+夜盤+OR+ADR)&hl=zh-TW&gl=TW&ceid=TW:zh-Hant"
     feed = feedparser.parse(rss_url)
     
-    news_titles = []
-    for entry in feed.entries[:12]:
-        news_titles.append(entry.title)
+    # 取得今天的日期與時間 (台灣時間 UTC+8)
+    tz_tw = datetime.timezone(datetime.timedelta(hours=8))
+    now_tw = datetime.datetime.now(tz_tw)
+    today_date = now_tw.date()
     
-    # 備援機制：若清晨新聞較少，稍微放寬至 12 小時內
-    if len(news_titles) < 4:
-        backup_url = "https://news.google.com/rss/search?q=site:money.udn.com+(台股+OR+美股+OR+夜盤)+when:12h&hl=zh-TW&gl=TW&ceid=TW:zh-Hant"
-        feed = feedparser.parse(backup_url)
-        news_titles = [entry.title for entry in feed.entries[:12]]
+    clean_titles = []
+    
+    for entry in feed.entries:
+        if not hasattr(entry, 'published_parsed') or not entry.published_parsed:
+            continue
+            
+        # 將 RSS 內文的新聞發布時間轉為 UTC，再轉換為台灣時間 (UTC+8)
+        pub_utc_epoch = time.mktime(entry.published_parsed)
+        pub_tw_dt = datetime.datetime.fromtimestamp(pub_utc_epoch, tz=datetime.timezone.utc).astimezone(tz_tw)
+        
+        # 【核心時間判定】：
+        # 1. 必須是今天 (today_date) 發布的新聞
+        # 2. 發布時間必須小於 7 點 (發布時間在 00:00 ~ 06:59 之間)
+        if pub_tw_dt.date() == today_date and pub_tw_dt.hour < 7:
+            if entry.title not in clean_titles:
+                clean_titles.append(entry.title)
+            
+        if len(clean_titles) >= 10:
+            break
 
-    return news_titles
+    # 備援機制：若是清晨新聞極少，自動抓取「過去 8 小時內」的新聞遞補
+    if len(clean_titles) < 3:
+        for entry in feed.entries:
+            if not hasattr(entry, 'published_parsed') or not entry.published_parsed:
+                continue
+            pub_utc_epoch = time.mktime(entry.published_parsed)
+            pub_tw_dt = datetime.datetime.fromtimestamp(pub_utc_epoch, tz=datetime.timezone.utc).astimezone(tz_tw)
+            
+            # 時間差在 8 小時以內
+            if (now_tw - pub_tw_dt).total_seconds() <= 8 * 3600:
+                if entry.title not in clean_titles:
+                    clean_titles.append(entry.title)
+            if len(clean_titles) >= 10:
+                break
+
+    return clean_titles
 
 def generate_report_content(news_titles):
-    """2. 將經濟日報新聞餵給 Gemini 進行含美股與台股夜盤的深度分析"""
+    """2. 將清晨最新新聞餵給 Gemini 進行含美股與台股夜盤的深度分析"""
     client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
     
     today_str = datetime.date.today().strftime("%Y 年 %m 月 %d 日")
@@ -35,14 +64,14 @@ def generate_report_content(news_titles):
     
     prompt = f"""
 今天是 {today_str}。
-以下是從《經濟日報》抓取的最新即時新聞頭條（包含昨晚美股、台股夜盤與最新總經消息）：
+以下是從《經濟日報》抓取今日清晨（00:00-07:00）最新發布的頭條新聞（包含昨晚美股、台股夜盤與總經動向）：
 {news_text}
 
 請扮演一位資深的台股首席策略分析師，針對上述新聞進行跨市場綜合解讀與深度精闢剖析。
 
-請務必精闢包含以下四大區塊：
+請務必包含以下四大區塊：
 一、【昨晚美股三大指數與台股夜盤動向解讀】
-重點分析昨晚美股三大指數（道瓊、那斯達克、標普500）以及台指期夜盤的表現、科技股/台積電ADR走勢與資金避險情緒。
+重點分析昨晚美股三大指數（道瓊、那斯達克、標普500）以及台指期夜盤表現、科技股/台積電ADR走勢與資金避險情緒。
 
 二、【台股今日開盤盤勢預判與熱門族群】
 根據昨晚外盤表現，評估今日台股開盤氣氛、關鍵支撐壓力區間，以及焦點族群（如半導體、AI概念股、重電傳產等）。
@@ -94,7 +123,6 @@ def format_analysis_html(raw_text):
     lines = cleaned.split("\n")
     formatted_lines = []
     
-    # 不同的區塊自動配對專屬的立體圖案
     icons = ["🇺🇸 🌙", "📈 💎", "⚠️ 📊", "🎯 💡"]
     icon_idx = 0
 
@@ -122,7 +150,6 @@ def create_pdf(news_titles, ai_analysis):
     
     cleaned_news = [clean_markdown_text(title) for title in news_titles]
     
-    # 新聞條目使用立體 3D 方框搭配藍光箭頭
     news_li_html = "".join([f'''
     <div class="news-3d-card">
         <div class="news-bullet">🔹</div>
@@ -183,7 +210,7 @@ def create_pdf(news_titles, ai_analysis):
                 border: 1px solid rgba(255, 255, 255, 0.3);
             }}
 
-            /* 快速觀察 - 3D 數據/指標卡片區 */
+            /* 3D 視覺數據指標卡片區 */
             .market-quick-cards {{
                 display: flex;
                 justify-content: space-between;
@@ -324,7 +351,7 @@ def create_pdf(news_titles, ai_analysis):
         </div>
 
         <div class="section">
-            <div class="section-main-title">經濟日報即時頭條與外盤焦點</div>
+            <div class="section-main-title">經濟日報清晨即時頭條</div>
             {news_li_html}
         </div>
 
@@ -375,7 +402,7 @@ if __name__ == "__main__":
     print("開始執行每日台股晨報自動化流程...")
     
     news_list = fetch_latest_stock_news()
-    print(f"已抓取經濟日報即時新聞（共 {len(news_list)} 則）。")
+    print(f"已抓取經濟日報今日清晨即時新聞（共 {len(news_list)} 則）。")
     
     analysis = generate_report_content(news_list)
     print("Gemini 精闢分析完畢。")
