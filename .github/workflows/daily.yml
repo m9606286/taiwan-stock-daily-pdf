@@ -33,18 +33,17 @@ jobs:
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          git add taiwan_stock_daily.pdf
-          git commit -m "Auto update daily stock PDF" || exit 0
-          git push
+          if [ -f taiwan_stock_daily.pdf ]; then
+            git add taiwan_stock_daily.pdf
+            git commit -m "Auto update daily stock PDF" || exit 0
+            git push
+          else
+            echo "PDF 檔案不存在，跳過 Git commit 步驟"
+          fi
 
       - name: 上傳 PDF 報告至 Artifacts (備份下載)
+        if: always() # 確保即使前方步驟有狀況，也會嘗試保存 Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: taiwan-stock-daily-pdf
           path: taiwan_stock_daily.pdf
-
-      - name: 執行 Python 自動化腳本
-        env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
-        run: python main.py
