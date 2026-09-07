@@ -3,7 +3,7 @@ import requests
 
 # 呼叫 LINE Messaging API 廣播 PDF 檔
 def send_line_broadcast(pdf_url):
-    line_token = os.environ.get("Y3z+Uhm2bvWVjQh+ykAR4hUUnMMbh156BmFNjj3ZgGwNtNWeEXwMYUfOCKjaky2unS4Yxfgq7gvXltbhQ6dDv058wlfnAfvKjJZiEQCTz43Cmo8PDOc6XY/lAN5dGoKwdWsk8hAjrZa0AstHAVZHxgdB04t89/1O/w1cDnyilFU=")
+    line_token = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
     url = "https://api.line.me/v2/bot/message/broadcast"
     
     headers = {
