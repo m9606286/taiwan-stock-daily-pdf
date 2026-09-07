@@ -9,24 +9,25 @@ from google.genai import errors
 from weasyprint import HTML
 
 def fetch_latest_stock_news():
-    """1. 自動抓取 Google News 過去 24 小時內的最新台股焦點新聞"""
-    rss_url = "https://news.google.com/rss/search?q=台股+當日焦點+when:1d&hl=zh-TW&gl=TW&ceid=TW:zh-Hant"
+    """1. 自動抓取「經濟日報」過去 7 小時內的即時台股焦點新聞"""
+    # 限定來源為 money.udn.com (經濟日報)，時間限定 when:7h
+    rss_url = "https://news.google.com/rss/search?q=site:money.udn.com+台股+when:7h&hl=zh-TW&gl=TW&ceid=TW:zh-Hant"
     feed = feedparser.parse(rss_url)
     
     news_titles = []
-    for entry in feed.entries[:8]:
+    for entry in feed.entries[:10]:  # 擷取最多 10 則即時新聞
         news_titles.append(entry.title)
     
-    if not news_titles:
-        backup_url = "https://news.google.com/rss/search?q=台股+焦點&hl=zh-TW&gl=TW&ceid=TW:zh-Hant"
+    # 備援機制：若清晨 7 小時內新聞較少，稍微放寬至 12 小時內的經濟日報
+    if len(news_titles) < 3:
+        backup_url = "https://news.google.com/rss/search?q=site:money.udn.com+台股+when:12h&hl=zh-TW&gl=TW&ceid=TW:zh-Hant"
         feed = feedparser.parse(backup_url)
-        for entry in feed.entries[:8]:
-            news_titles.append(entry.title)
+        news_titles = [entry.title for entry in feed.entries[:10]]
 
     return news_titles
 
 def generate_report_content(news_titles):
-    """2. 將新聞餵給 Gemini 生成深度分析內文"""
+    """2. 將經濟日報新聞餵給 Gemini 進行深度精闢分析"""
     client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
     
     today_str = datetime.date.today().strftime("%Y 年 %m 月 %d 日")
@@ -34,19 +35,28 @@ def generate_report_content(news_titles):
     
     prompt = f"""
 今天是 {today_str}。
-以下是今日剛發布的台股重點即時新聞標題：
+以下是從《經濟日報》抓取的近 7 小時內最新台股即時新聞標題：
 {news_text}
 
-請扮演專業的台股分析師，根據上述最新的新聞內容，幫我撰寫一份結構清晰、專業且易讀的「每日台股市場剖析」。
-請務必包含以下三大區塊：
-一、【大盤焦點與市場趨勢】
-二、【熱門族群與重點個股動態】
-三、【後續操作觀察與風險提示】
+請扮演一位資深的台股首席策略分析師與產業研究員，請不要只是條列新聞，而是將上述新聞進行 cross-reference（交叉比對與綜合歸納），進行非常精闢且有洞察力的深度分析。
+
+請務必包含以下四大區塊：
+一、【大盤總經與籌碼動向精闢解讀】
+分析整體市場氣氛、資金流向與大盤關鍵支撐/壓力位階預判。
+
+二、【熱門產業族群與關鍵個股深度剖析】
+針對新聞提及的重點個股或產業（如半導體、AI、傳產、電子零組件等），分析其基本面催化劑與短中線動能。
+
+三、【市場潛在風險與觀望指標】
+提煉目前市場未顯現或需警惕的風險點（如國際市場連動、匯率、總經數據發布等）。
+
+四、【今日操作策略與關鍵應對思維】
+給予投資人明確、具體的資產配置或進出場操作建議。
 
 【注意事項】：
-1. 輸出時請使用清晰段落與標題，完全不要使用 --- 分隔線、*、** 或 #### 符號。
-2. 必須嚴格基於上述提供的新聞內容進行分析，切勿混入過期的歷史行情。
-3. 全部使用繁體中文呈現，用語精煉專業。
+1. 分析必須精闢、具商業洞察，絕不能只是重述新聞標題。
+2. 完全不要使用 --- 分隔線、*、** 或 #### 符號。
+3. 嚴格基於上述提供的新聞內容進行分析，全部使用繁體中文呈現。
 """
     
     config = {
@@ -71,11 +81,11 @@ def generate_report_content(news_titles):
 
 def clean_markdown_text(text):
     """助手函數：徹底清除文字中殘留的 ---, *, **, #### 等 Markdown 符號"""
-    text = re.sub(r'^-{3,}\s*$', '', text, flags=re.MULTILINE) # 去除 --- 分隔線
-    text = re.sub(r'#{1,6}\s*', '', text)                     # 去除 #, ##, ### 等標題符號
-    text = re.sub(r'\*\*(.*?)\*\*', r'\1', text)             # 去除粗體 **
-    text = re.sub(r'\*(.*?)\*', r'\1', text)                 # 去除斜體/強調 *
-    text = re.sub(r'^\s*[\*\-]\s+', '', text, flags=re.MULTILINE) # 清除開頭圓點或橫線標記
+    text = re.sub(r'^-{3,}\s*$', '', text, flags=re.MULTILINE) 
+    text = re.sub(r'#{1,6}\s*', '', text)                     
+    text = re.sub(r'\*\*(.*?)\*\*', r'\1', text)             
+    text = re.sub(r'\*(.*?)\*', r'\1', text)                 
+    text = re.sub(r'^\s*[\*\-]\s+', '', text, flags=re.MULTILINE) 
     return text.strip()
 
 def format_analysis_html(raw_text):
@@ -88,7 +98,6 @@ def format_analysis_html(raw_text):
         line_str = line.strip()
         if not line_str:
             continue
-        # 匹配 一、【...】、二、【...】 或類似的大段落標題
         if re.match(r'^[一二三四五六七八九十]、\s*【.*】', line_str) or re.match(r'^【.*】', line_str):
             formatted_lines.append(f'<div class="blue-title-box">{line_str}</div>')
         else:
@@ -97,12 +106,10 @@ def format_analysis_html(raw_text):
     return "".join(formatted_lines)
 
 def create_pdf(news_titles, ai_analysis):
-    """3. 適合手機閱讀（大字體）與藍色立體方框設計的 PDF 生成"""
+    """3. 生成大字體與藍色立體方框設計的 PDF 報告"""
     today_str = datetime.date.today().strftime("%Y/%m/%d")
     
     cleaned_news = [clean_markdown_text(title) for title in news_titles]
-    
-    # 新聞清單改為藍色立體方框 (白字、無圓點)
     news_li_html = "".join([f"<div class='news-blue-box'>{title}</div>" for title in cleaned_news])
     formatted_analysis_html = format_analysis_html(ai_analysis)
     
@@ -123,12 +130,10 @@ def create_pdf(news_titles, ai_analysis):
                 margin: 0;
                 padding: 0;
                 color: #0f172a;
-                /* 全局字體大幅放大，利於手機閱讀 */
                 font-size: 13pt;
                 line-height: 1.8;
             }}
             
-            /* 頂部主標題 Header Banner */
             .header {{
                 background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%);
                 color: #ffffff;
@@ -155,7 +160,6 @@ def create_pdf(news_titles, ai_analysis):
                 border: 1px solid rgba(255, 255, 255, 0.4);
             }}
 
-            /* 卡片外框容器 */
             .section {{
                 background: #ffffff;
                 border-radius: 12px;
@@ -165,7 +169,6 @@ def create_pdf(news_titles, ai_analysis):
                 border: 1px solid #e2e8f0;
             }}
             
-            /* 區塊主標題 */
             .section-main-title {{
                 font-size: 16pt;
                 font-weight: 800;
@@ -176,7 +179,6 @@ def create_pdf(news_titles, ai_analysis):
                 border-left: 6px solid #2563eb;
             }}
             
-            /* 焦點新聞藍色立體方框（白字、無圓點） */
             .news-blue-box {{
                 background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
                 color: #ffffff;
@@ -189,7 +191,6 @@ def create_pdf(news_titles, ai_analysis):
                 border-bottom: 3px solid #1e40af;
             }}
             
-            /* 內文藍色立體標題方框（白字） */
             .blue-title-box {{
                 background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
                 color: #ffffff;
@@ -203,7 +204,6 @@ def create_pdf(news_titles, ai_analysis):
                 letter-spacing: 0.5px;
             }}
 
-            /* 段落文字放大，提升手機視覺舒適度 */
             .content-p {{
                 margin: 0 0 12px 0;
                 color: #334155;
@@ -211,7 +211,6 @@ def create_pdf(news_titles, ai_analysis):
                 line-height: 1.8;
             }}
 
-            /* 頁尾 */
             .footer {{
                 margin-top: 25px;
                 font-size: 10.5pt;
@@ -225,21 +224,21 @@ def create_pdf(news_titles, ai_analysis):
     <body>
         <div class="header">
             <h1>每日台股焦點與趨勢晨報</h1>
-            <div class="subtitle-badge">📊 自動化即時彙整｜日期：{today_str}</div>
+            <div class="subtitle-badge">📊 經濟日報即時源｜日期：{today_str}</div>
         </div>
 
         <div class="section">
-            <div class="section-main-title">即時焦點新聞摘要</div>
+            <div class="section-main-title">經濟日報 7小時內即時新聞頭條</div>
             {news_li_html}
         </div>
 
         <div class="section">
-            <div class="section-main-title">Gemini AI 市場深度剖析</div>
+            <div class="section-main-title">Gemini 首席策略分析</div>
             {formatted_analysis_html}
         </div>
 
         <div class="footer">
-            本報告由 GitHub Actions 自動抓取即時新聞並經 Gemini AI 彙整生成｜僅供參考，不構成投資建議
+            本報告由 GitHub Actions 自動抓取經濟日報即時新聞並經 Gemini AI 深度彙整｜僅供參考，不構成投資建議
         </div>
     </body>
     </html>
@@ -268,7 +267,7 @@ def send_line_broadcast(text_content):
         "messages": [
             {
                 "type": "text",
-                "text": f"【台股每日晨報 - {today_str}】\n\n{preview_text}\n\n📄 點此下載完整排版 PDF：\n{pdf_url}"
+                "text": f"【經濟日報台股晨報 - {today_str}】\n\n{preview_text}\n\n📄 點此下載完整排版 PDF：\n{pdf_url}"
             }
         ]
     }
@@ -283,10 +282,10 @@ if __name__ == "__main__":
     print("開始執行每日台股晨報自動化流程...")
     
     news_list = fetch_latest_stock_news()
-    print(f"已抓取當日焦點新聞（共 {len(news_list)} 則）。")
+    print(f"已抓取經濟日報即時新聞（共 {len(news_list)} 則）。")
     
     analysis = generate_report_content(news_list)
-    print("Gemini 分析完畢。")
+    print("Gemini 精闢分析完畢。")
     
     pdf_file = create_pdf(news_list, analysis)
     print(f"PDF 晨報產出成功：{pdf_file}")
