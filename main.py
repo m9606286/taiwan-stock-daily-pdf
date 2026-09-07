@@ -44,7 +44,7 @@ def generate_report_content(news_titles):
 三、【後續操作觀察與風險提示】
 
 【注意事項】：
-1. 輸出時請盡量使用純文字或清晰段落，避免使用過多的 * 或 #### 符號。
+1. 輸出時請使用清晰段落與標題，完全不要使用 --- 分隔線、*、** 或 #### 符號。
 2. 必須嚴格基於上述提供的新聞內容進行分析，切勿混入過期的歷史行情。
 3. 全部使用繁體中文呈現，用語精煉專業。
 """
@@ -70,22 +70,41 @@ def generate_report_content(news_titles):
                 raise e
 
 def clean_markdown_text(text):
-    """助手函數：清除文字中殘留的 *, **, #### 符號，轉換為乾淨純文字"""
-    text = re.sub(r'#{1,6}\s*', '', text)  # 去除 #, ##, ### 等標題符號
-    text = re.sub(r'\*\*(.*?)\*\*', r'\1', text)  # 去除粗體 **
-    text = re.sub(r'\*(.*?)\*', r'\1', text)      # 去除斜體/強調 *
-    text = re.sub(r'^\s*[\*\-]\s+', '• ', text, flags=re.MULTILINE) # 統一清單符號為圓點
+    """助手函數：徹底清除文字中殘留的 ---, *, **, #### 等 Markdown 符號"""
+    text = re.sub(r'^-{3,}\s*$', '', text, flags=re.MULTILINE) # 去除 --- 分隔線
+    text = re.sub(r'#{1,6}\s*', '', text)                     # 去除 #, ##, ### 等標題符號
+    text = re.sub(r'\*\*(.*?)\*\*', r'\1', text)             # 去除粗體 **
+    text = re.sub(r'\*(.*?)\*', r'\1', text)                 # 去除斜體/強調 *
+    text = re.sub(r'^\s*[\*\-]\s+', '', text, flags=re.MULTILINE) # 清除開頭圓點或橫線標記
     return text.strip()
 
+def format_analysis_html(raw_text):
+    """將分析內文的大標題自動轉換為『藍色立體方框（白字）』風格的 HTML"""
+    cleaned = clean_markdown_text(raw_text)
+    lines = cleaned.split("\n")
+    formatted_lines = []
+    
+    for line in lines:
+        line_str = line.strip()
+        if not line_str:
+            continue
+        # 匹配 一、【...】、二、【...】 或類似的大段落標題
+        if re.match(r'^[一二三四五六七八九十]、\s*【.*】', line_str) or re.match(r'^【.*】', line_str):
+            formatted_lines.append(f'<div class="blue-title-box">{line_str}</div>')
+        else:
+            formatted_lines.append(f'<p class="content-p">{line_str}</p>')
+            
+    return "".join(formatted_lines)
+
 def create_pdf(news_titles, ai_analysis):
-    """3. 高級立體視覺與配色設計 PDF 生成"""
+    """3. 適合手機閱讀（大字體）與藍色立體方框設計的 PDF 生成"""
     today_str = datetime.date.today().strftime("%Y/%m/%d")
     
-    # 清理標題與分析內文的雜訊符號
     cleaned_news = [clean_markdown_text(title) for title in news_titles]
-    cleaned_analysis = clean_markdown_text(ai_analysis)
     
-    news_li_html = "".join([f"<li><span class='bullet-icon'>◆</span><span class='news-text'>{title}</span></li>" for title in cleaned_news])
+    # 新聞清單改為藍色立體方框 (白字、無圓點)
+    news_li_html = "".join([f"<div class='news-blue-box'>{title}</div>" for title in cleaned_news])
+    formatted_analysis_html = format_analysis_html(ai_analysis)
     
     html_content = f"""
     <!DOCTYPE html>
@@ -95,109 +114,111 @@ def create_pdf(news_titles, ai_analysis):
         <style>
             @page {{
                 size: A4;
-                margin: 12mm;
-                background-color: #f1f5f9;
+                margin: 10mm;
+                background-color: #f8fafc;
             }}
             * {{ box-sizing: border-box; }}
             body {{
                 font-family: "Noto Sans CJK TC", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
                 margin: 0;
                 padding: 0;
-                color: #1e293b;
-                font-size: 10pt;
-                line-height: 1.65;
+                color: #0f172a;
+                /* 全局字體大幅放大，利於手機閱讀 */
+                font-size: 13pt;
+                line-height: 1.8;
             }}
             
-            /* 頂部雙色立體 Banner */
+            /* 頂部主標題 Header Banner */
             .header {{
-                background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%);
+                background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%);
                 color: #ffffff;
-                padding: 22px 25px;
+                padding: 24px;
                 border-radius: 12px;
-                margin-bottom: 18px;
-                box-shadow: 0 8px 16px rgba(30, 58, 138, 0.25);
-                position: relative;
+                margin-bottom: 20px;
+                box-shadow: 0 8px 18px rgba(30, 58, 138, 0.3);
             }}
             .header h1 {{
                 margin: 0;
-                font-size: 20pt;
-                font-weight: 700;
-                letter-spacing: 1.5px;
-                text-shadow: 0 2px 4px rgba(0,0,0,0.2);
+                font-size: 22pt;
+                font-weight: 800;
+                letter-spacing: 1px;
+                text-shadow: 0 2px 4px rgba(0,0,0,0.25);
             }}
             .header .subtitle-badge {{
                 display: inline-block;
-                background: rgba(255, 255, 255, 0.2);
-                padding: 4px 12px;
+                background: rgba(255, 255, 255, 0.25);
+                padding: 6px 14px;
                 border-radius: 20px;
-                font-size: 9pt;
-                color: #f8fafc;
-                margin-top: 8px;
-                border: 1px solid rgba(255, 255, 255, 0.3);
+                font-size: 11pt;
+                color: #ffffff;
+                margin-top: 10px;
+                border: 1px solid rgba(255, 255, 255, 0.4);
             }}
 
-            /* 質感卡片區塊 */
+            /* 卡片外框容器 */
             .section {{
                 background: #ffffff;
-                border-radius: 10px;
-                padding: 18px 22px;
-                margin-bottom: 16px;
-                box-shadow: 0 4px 12px rgba(15, 23, 42, 0.06);
+                border-radius: 12px;
+                padding: 22px;
+                margin-bottom: 20px;
+                box-shadow: 0 4px 14px rgba(15, 23, 42, 0.08);
                 border: 1px solid #e2e8f0;
             }}
             
-            /* 具備立體色塊指示條的標題 */
-            .section-title {{
-                font-size: 12pt;
-                font-weight: 700;
-                color: #0f172a;
+            /* 區塊主標題 */
+            .section-main-title {{
+                font-size: 16pt;
+                font-weight: 800;
+                color: #1e3a8a;
                 margin-top: 0;
-                margin-bottom: 14px;
-                padding-left: 12px;
-                border-left: 5px solid #2563eb;
-                display: flex;
-                align-items: center;
+                margin-bottom: 16px;
+                padding-left: 14px;
+                border-left: 6px solid #2563eb;
             }}
             
-            /* 新聞清單樣式 */
-            ul.news-list {{
-                list-style: none;
-                margin: 0;
-                padding: 0;
-            }}
-            ul.news-list li {{
-                padding: 8px 12px;
-                margin-bottom: 6px;
-                background: #f8fafc;
-                border-radius: 6px;
-                border-left: 3px solid #cbd5e1;
-                font-size: 9.5pt;
-            }}
-            ul.news-list li .bullet-icon {{
-                color: #2563eb;
-                font-size: 8pt;
-                margin-right: 8px;
-            }}
-            
-            /* AI 分析文樣式 */
-            .content {{
-                white-space: pre-wrap;
-                color: #334155;
-                font-size: 10pt;
-                background: #fafafa;
-                padding: 14px 16px;
+            /* 焦點新聞藍色立體方框（白字、無圓點） */
+            .news-blue-box {{
+                background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+                color: #ffffff;
+                padding: 12px 18px;
+                margin-bottom: 10px;
                 border-radius: 8px;
-                border: 1px dashed #cbd5e1;
+                font-size: 12.5pt;
+                font-weight: 600;
+                box-shadow: 0 4px 8px rgba(37, 99, 235, 0.25);
+                border-bottom: 3px solid #1e40af;
+            }}
+            
+            /* 內文藍色立體標題方框（白字） */
+            .blue-title-box {{
+                background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
+                color: #ffffff;
+                padding: 12px 18px;
+                margin-top: 22px;
+                margin-bottom: 14px;
+                border-radius: 8px;
+                font-size: 14pt;
+                font-weight: 800;
+                box-shadow: 0 4px 10px rgba(30, 64, 175, 0.3);
+                letter-spacing: 0.5px;
+            }}
+
+            /* 段落文字放大，提升手機視覺舒適度 */
+            .content-p {{
+                margin: 0 0 12px 0;
+                color: #334155;
+                font-size: 13pt;
+                line-height: 1.8;
             }}
 
             /* 頁尾 */
             .footer {{
-                margin-top: 20px;
-                font-size: 8.5pt;
+                margin-top: 25px;
+                font-size: 10.5pt;
                 color: #64748b;
                 text-align: center;
-                padding-top: 10px;
-                border-top: 1px solid #e2e8f0;
+                padding-top: 14px;
+                border-top: 1px solid #cbd5e1;
             }}
         </style>
     </head>
@@ -208,15 +229,13 @@ def create_pdf(news_titles, ai_analysis):
         </div>
 
         <div class="section">
-            <div class="section-title">即時焦點新聞摘要</div>
-            <ul class="news-list">
-                {news_li_html}
-            </ul>
+            <div class="section-main-title">即時焦點新聞摘要</div>
+            {news_li_html}
         </div>
 
         <div class="section">
-            <div class="section-title">Gemini AI 市場深度剖析</div>
-            <div class="content">{cleaned_analysis}</div>
+            <div class="section-main-title">Gemini AI 市場深度剖析</div>
+            {formatted_analysis_html}
         </div>
 
         <div class="footer">
