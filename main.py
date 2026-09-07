@@ -248,7 +248,7 @@ def create_pdf(news_titles, ai_analysis):
     return pdf_path
 
 def send_line_broadcast(text_content):
-    """4. 透過 LINE 發送精華摘要與 JSDelivr CDN PDF 連結"""
+    """4. 透過 LINE 發送精簡訊息與 PDF 連結"""
     line_token = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
     url = "https://api.line.me/v2/bot/message/broadcast"
     
@@ -257,17 +257,15 @@ def send_line_broadcast(text_content):
         "Authorization": f"Bearer {line_token}"
     }
     
-    today_str = datetime.date.today().strftime("%Y/%m/%d")
-    clean_preview = clean_markdown_text(text_content)
-    
+    # 格式化為 M/D (例如: 9/7)
+    today_short = datetime.datetime.now().strftime("%-m/%-d") if hasattr(datetime.datetime.now(), 'strftime') else datetime.datetime.now().strftime("%m/%d").lstrip('0').replace('/0', '/')
     pdf_url = "https://cdn.jsdelivr.net/gh/m9606286/taiwan-stock-daily-pdf@main/taiwan_stock_daily.pdf"
-    preview_text = clean_preview[:800] + "..." if len(clean_preview) > 800 else clean_preview
     
     payload = {
         "messages": [
             {
                 "type": "text",
-                "text": f"【經濟日報台股晨報 - {today_str}】\n\n{preview_text}\n\n📄 點此下載完整排版 PDF：\n{pdf_url}"
+                "text": f"📈 {today_short} 台股報報\n\n📄 點擊連結查看今日 AI 精闢分析 PDF 報告：\n{pdf_url}"
             }
         ]
     }
