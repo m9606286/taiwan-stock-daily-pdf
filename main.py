@@ -73,7 +73,7 @@ def create_pdf(news_titles, ai_analysis):
             }}
             * {{ box-sizing: border-box; }}
             body {{
-                font-family: "PingFang TC", "Microsoft JhengHei", sans-serif;
+                font-family: "Noto Sans CJK TC", "PingFang TC", "Microsoft JhengHei", sans-serif;
                 margin: 0;
                 padding: 0;
                 color: #2d3748;
@@ -161,7 +161,7 @@ def create_pdf(news_titles, ai_analysis):
     return pdf_path
 
 def send_line_broadcast(text_content):
-    """4. 透過 LINE 發送精華摘要推播"""
+    """4. 透過 LINE 發送精華摘要與 GitHub Raw PDF 下載連結"""
     line_token = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
     url = "https://api.line.me/v2/bot/message/broadcast"
     
@@ -170,13 +170,14 @@ def send_line_broadcast(text_content):
         "Authorization": f"Bearer {line_token}"
     }
     
-    preview_text = text_content[:900] + "...\n\n（完整排版 PDF 已同步自動產出）" if len(text_content) > 900 else text_content
+    pdf_url = "https://raw.githubusercontent.com/m9606286/taiwan-stock-daily-pdf/main/taiwan_stock_daily.pdf"
+    preview_text = text_content[:800] + "..." if len(text_content) > 800 else text_content
     
     payload = {
         "messages": [
             {
                 "type": "text",
-                "text": f"【台股每日晨報】\n\n{preview_text}"
+                "text": f"【台股每日晨報】\n\n{preview_text}\n\n📄 點此下載完整排版 PDF：\n{pdf_url}"
             }
         ]
     }
