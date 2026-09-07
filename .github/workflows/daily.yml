@@ -20,16 +20,25 @@ jobs:
         with:
           python-version: '3.10'
 
+      # 1. 必須在執行腳本前先安裝 Linux 中文字型
+      - name: 安裝系統中文字型
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fonts-noto-cjk
+
+      # 2. 安裝 Python 套件
       - name: 安裝必要套件
         run: |
           pip install google-genai requests weasyprint feedparser
 
+      # 3. 執行 Python 腳本生成 PDF 並發送 LINE
       - name: 執行 Python 自動化腳本
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
         run: python main.py
 
+      # 4. 提交 PDF 檔案回到 GitHub Repository
       - name: 將 PDF 報告提交回 Repository
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
@@ -42,6 +51,7 @@ jobs:
             echo "PDF 檔案不存在，跳過 Git commit"
           fi
 
+      # 5. 上傳 Artifact 備份
       - name: 上傳 PDF 報告至 Artifacts (備份下載)
         if: always()
         uses: actions/upload-artifact@v4
@@ -49,18 +59,3 @@ jobs:
           name: taiwan-stock-daily-pdf
           path: taiwan_stock_daily.pdf
           if-no-files-found: ignore
-
-      - name: 設定 Python 環境
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-
-      # 🔻 新增此步驟：安裝 Google 思源黑體中文字型
-      - name: 安裝系統中文字型
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y fonts-noto-cjk
-
-      - name: 安裝必要套件
-        run: |
-          pip install google-genai requests weasyprint feedparser
