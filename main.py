@@ -35,9 +35,9 @@ def generate_report_content(news_titles):
             else:
                 raise e
                 
-    # 若重試三次仍失敗，退回使用相容模型
+    # 若重試三次仍失敗，進行最後一次呼叫
     response = client.models.generate_content(
-        model="gemini-2.5-flash",
+        model="gemini-3.6-flash",
         contents=prompt
     )
     return response.text
