@@ -3,13 +3,14 @@ name: Daily Taiwan Stock PDF Broadcast
 on:
   schedule:
     # UTC 23:00 等於台灣時間 (UTC+8) 隔天早上 07:00
-    # 0 23 * * 0-4 代表週日到週四 UTC 23:00 執行 (即台灣時間週一至週五 07:00)
     - cron: '0 23 * * 0-4'
-  workflow_dispatch: # 允許在頁面上點擊按鈕手動測試
+  workflow_dispatch: # 允許手動測試
 
 jobs:
   run-automation:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # 顯式賦予寫入權限
     steps:
       - name: 載入專案程式碼
         uses: actions/checkout@v4
@@ -38,12 +39,13 @@ jobs:
             git commit -m "Auto update daily stock PDF" || exit 0
             git push
           else
-            echo "PDF 檔案不存在，跳過 Git commit 步驟"
+            echo "PDF 檔案不存在，跳過 Git commit"
           fi
 
       - name: 上傳 PDF 報告至 Artifacts (備份下載)
-        if: always() # 確保即使前方步驟有狀況，也會嘗試保存 Artifacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: taiwan-stock-daily-pdf
           path: taiwan_stock_daily.pdf
+          if-no-files-found: ignore
