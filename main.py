@@ -45,21 +45,6 @@ def fetch_latest_stock_news():
     return clean_titles
 
 
-def _is_retryable_gemini_error(error):
-    status = getattr(error, "status_code", None) or getattr(error, "code", None)
-    message = str(error).lower()
-    if status in (404,) or "404" in message or "not_found" in message or "not found" in message:
-        return False
-    if status in (429, 500, 503, 504):
-        return True
-
-    retry_markers = (
-        "503", "429", "500", "504", "unavailable", "overloaded",
-        "resource exhausted", "temporarily", "try again", "timeout",
-    )
-    return any(marker in message for marker in retry_markers)
-
-
 def generate_video_script_and_cards(news_titles):
     """由 Gemini 生成 2 分鐘腳本，並拆分為 4 個主題圖卡內容"""
     api_key = (os.environ.get("GEMINI_API_KEY") or "").strip()
@@ -104,33 +89,34 @@ AI智算盤勢解析
 4. 務必使用「===CARD===」分隔 4 個區塊。
 """
 
-    # 使用最新的 Gemini 3.6 Flash 模型
-    models_to_try = ["gemini-3.6-flash"]
+    # 配置輪詢模型清單，確保 404 (失效) 或 429 (配額額滿) 時自動備援切換
+    models_to_try = [
+        "gemini-3.6-flash",
+        "gemini-2.5-flash",
+        "gemini-1.5-flash"
+    ]
+    
     script_raw = None
     last_error = None
 
     for model_name in models_to_try:
-        for attempt in range(1, 4):
-            try:
-                print(f"嘗試使用模型 [{model_name}] 生成 2 分鐘腳本 (第 {attempt} 次)...")
-                result = client.models.generate_content(
-                    model=model_name,
-                    contents=prompt,
-                )
-                text = getattr(result, "text", None) or getattr(result, "output_text", None)
-                if text:
-                    script_raw = text
-                    print(f"成功使用 [{model_name}] 生成腳本！")
-                    break
-            except Exception as e:
-                last_error = e
-                print(f"模型 [{model_name}] 第 {attempt} 次呼叫失敗: {e}")
-                if attempt < 3 and _is_retryable_gemini_error(e):
-                    time.sleep(attempt * 3)
-                    continue
+        try:
+            print(f"嘗試使用模型 [{model_name}] 生成 2 分鐘腳本...")
+            result = client.models.generate_content(
+                model=model_name,
+                contents=prompt,
+            )
+            text = getattr(result, "text", None) or getattr(result, "output_text", None)
+            if text:
+                script_raw = text
+                print(f"成功使用 [{model_name}] 生成腳本！")
                 break
-        if script_raw:
-            break
+        except Exception as e:
+            last_error = e
+            err_msg = str(e)
+            print(f"模型 [{model_name}] 呼叫失敗: {err_msg}")
+            # 當遭遇 404 停用、429 配額額滿或 RESOURCE_EXHAUSTED，自動跳過切換下一個模型
+            continue
 
     if not script_raw:
         raise RuntimeError(f"所有 Gemini 模型呼叫失敗，最後錯誤: {last_error}")
@@ -144,11 +130,10 @@ AI智算盤勢解析
         if not lines:
             continue
         
-        # 提取第一行為標題，其餘為內文
         raw_title = lines[0]
         raw_body = "".join(lines[1:]) if len(lines) > 1 else lines[0]
 
-        # 清除前綴贅字
+        # 清除前綴贅字與標籤
         clean_title = re.sub(r"^(標題|卡片\d+|區塊\d+)[:：\s]*", "", raw_title).strip()
         clean_body = re.sub(r"^(內文|標題)[:：\s]*", "", raw_body).strip()
         clean_body = re.sub(r"[^\w\s\u4e00-\u9fa5，。！？；：]", "", clean_body).strip()
@@ -158,12 +143,11 @@ AI智算盤勢解析
             "body": clean_body
         })
 
-    # 確保剛好 4 張
+    # 確保剛好 4 張卡片
     while len(cards_data) < 4:
         cards_data.append({"title": "市場觀察", "body": "祝您今日投資順利，掌握市場先機。"})
     cards_data = cards_data[:4]
 
-    # 合併完整口播腳本
     full_audio_script = " ".join([c["body"] for c in cards_data])
     return cards_data, full_audio_script
 
@@ -176,11 +160,10 @@ async def text_to_speech(text, output_file="narration.mp3"):
 
 
 def create_fallback_3d_template(width=1080, height=1920):
-    """當找不到 template.png 時，備用的 3D 科技感底圖生成器"""
+    """當找不到 template.png 時的備用 3D 科技底圖"""
     base = Image.new("RGBA", (width, height), (10, 16, 35, 255))
     draw = ImageDraw.Draw(base)
 
-    # 青藍/紫藍底層光暈
     glow = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     glow_draw = ImageDraw.Draw(glow)
     glow_draw.ellipse([(-100, -100), (900, 900)], fill=(0, 180, 255, 45))
@@ -189,9 +172,7 @@ def create_fallback_3d_template(width=1080, height=1920):
     base = Image.alpha_composite(base, glow)
 
     draw = ImageDraw.Draw(base)
-    # 頂部科技抬頭
     draw.text((90, 80), "AI 盤前極速總研", fill="#00E5FF")
-    # 中央玻璃框邊框
     draw.rounded_rectangle([60, 270, 1020, 1750], radius=30, fill=(15, 23, 42, 220), outline="#00E5FF", width=3)
     return base
 
@@ -211,14 +192,13 @@ def draw_3d_card(title, body_text, card_num, total_cards=4, output_img="card.png
 
     draw = ImageDraw.Draw(base)
 
-    # 2. 清理與重繪中央面板內文區域 (消除舊範例文字，保持乾淨背景)
-    # 面板邊界: left=70, top=410, right=1010, bottom=1620
+    # 2. 清理中段面板背景（覆蓋掉舊圖片的預設文字）
     draw.rectangle([75, 410, 1005, 1620], fill=(10, 18, 38, 255))
 
     # 3. 字型設定
     font_path = "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc"
     if not os.path.exists(font_path):
-        font_path = r"C:\Windows\Fonts\msjh.ttc"  # Windows 微軟正黑體備用
+        font_path = r"C:\Windows\Fonts\msjh.ttc"
 
     try:
         title_font = ImageFont.truetype(font_path, 48)
@@ -230,7 +210,7 @@ def draw_3d_card(title, body_text, card_num, total_cards=4, output_img="card.png
     tz_tw = datetime.timezone(datetime.timedelta(hours=8))
     today_str = datetime.datetime.now(tz_tw).strftime("%Y/%m/%d")
 
-    # 4. 動態更新日期與頁碼標籤 (覆蓋上標區域)
+    # 4. 動態寫入頂部日期與卡片計數
     draw.rectangle([210, 190, 390, 230], fill=(10, 18, 38, 255))
     draw.text((215, 195), today_str, font=sub_font, fill="#94A3B8")
 
@@ -238,21 +218,19 @@ def draw_3d_card(title, body_text, card_num, total_cards=4, output_img="card.png
     draw.rectangle([780, 85, 980, 130], fill=(10, 18, 38, 255))
     draw.text((785, 90), tag_text, font=sub_font, fill="#00E5FF")
 
-    # 5. 渲染中央 3D 金屬框標題
-    # 覆蓋舊標題欄位
+    # 5. 渲染 3D 金屬標題
     draw.rectangle([220, 275, 860, 345], fill=(15, 25, 50, 255))
     display_title = f"【 {title} 】"
     
-    # 標題居中計算
     title_bbox = draw.textbbox((0, 0), display_title, font=title_font)
     title_w = title_bbox[2] - title_bbox[0]
     title_x = (width - title_w) // 2
     
-    # 標題金色立體發光陰影
+    # 標題金色立體發光效果
     draw.text((title_x + 2, 287), display_title, font=title_font, fill="#8B6508")
     draw.text((title_x, 285), display_title, font=title_font, fill="#FFD700")
 
-    # 6. 動態排版與渲染內文
+    # 6. 動態排版與繪製內文
     box_x1, box_x2 = 100, 980
     max_width = box_x2 - box_x1
 
@@ -269,14 +247,11 @@ def draw_3d_card(title, body_text, card_num, total_cards=4, output_img="card.png
     if current_line:
         lines.append(current_line)
 
-    # 每頁最多繪製 15 行，確保不超出 3D 金屬面板邊框
     y_offset = 430
     line_height = 66
 
     for line in lines[:15]:
-        # 黑色文字底影，創造立體浮雕感
         draw.text((box_x1 + 2, y_offset + 2), line, font=body_font, fill="#000000")
-        # 主體清晰白字
         draw.text((box_x1, y_offset), line, font=body_font, fill="#F8FAFC")
         y_offset += line_height
 
@@ -295,7 +270,6 @@ def render_multi_card_video(cards_data, audio_file="narration.mp3", output_mp4="
         img_filename = f"card_{idx+1}.png"
         draw_3d_card(card["title"], card["body"], card_num=idx+1, total_cards=num_cards, output_img=img_filename)
         
-        # 計算每張卡片播放時間
         dur = per_card_duration if idx < num_cards - 1 else (total_duration - per_card_duration * (num_cards - 1))
         clip = ImageClip(img_filename).with_duration(dur)
         clips.append(clip)
@@ -326,7 +300,6 @@ def send_line_broadcast():
     tz_tw = datetime.timezone(datetime.timedelta(hours=8))
     today_short = datetime.datetime.now(tz_tw).strftime("%m/%d").lstrip("0").replace("/0", "/")
 
-    # 移除網址末端 ?v= 參數，讓 LINE 伺服器能 100% 讀取與播放 MP4 檔案
     video_url = "https://cdn.jsdelivr.net/gh/m9606286/taiwan-stock-daily-pdf@main/daily_report.mp4"
     preview_url = "https://cdn.jsdelivr.net/gh/m9606286/taiwan-stock-daily-pdf@main/card_1.png"
 
@@ -355,7 +328,7 @@ if __name__ == "__main__":
     print("1. 抓取最新財經頭條...")
     news = fetch_latest_stock_news()
 
-    print("2. Gemini (3.6-flash) 生成 2 分鐘深度腳本與 4 張圖卡結構...")
+    print("2. 呼叫 Gemini 生成 2 分鐘腳本與 4 張圖卡結構...")
     cards, audio_script = generate_video_script_and_cards(news)
 
     print("3. 合成 2 分鐘高音質語音 (Edge-TTS)...")
