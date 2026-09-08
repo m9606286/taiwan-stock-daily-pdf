@@ -7,7 +7,7 @@ from google import genai
 
 
 def fetch_comprehensive_market_news():
-    """多源頭廣抓今早最新全市場財經新聞"""
+    """廣抓今早最新全市場財經新聞"""
     rss_urls = [
         "https://news.google.com/rss/search?q=site:money.udn.com+(台股+OR+半導體+OR+AI+OR+電子+OR+金融)&hl=zh-TW&gl=TW&ceid=TW:zh-Hant",
         "https://news.google.com/rss/search?q=site:ctee.com.tw+(台股+OR+產業+OR+營收+OR+概念股)&hl=zh-TW&gl=TW&ceid=TW:zh-Hant",
@@ -16,7 +16,6 @@ def fetch_comprehensive_market_news():
     ]
 
     tz_tw = datetime.timezone(datetime.timedelta(hours=8))
-    now_tw = datetime.datetime.now(tz_tw)
     clean_titles = []
 
     for url in rss_urls:
@@ -24,7 +23,6 @@ def fetch_comprehensive_market_news():
             feed = feedparser.parse(url)
             for entry in feed.entries:
                 title = entry.title.split(" - ")[0].strip()
-                # 排除重複與長度過短標題
                 if title and len(title) > 6 and title not in clean_titles:
                     clean_titles.append(title)
                 if len(clean_titles) >= 30:
@@ -37,37 +35,48 @@ def fetch_comprehensive_market_news():
 
 
 def generate_deep_text_report(news_titles):
-    """由 Gemini AI 進行多產業歸類與深度極精闢盤勢剖析"""
+    """由 Gemini AI 生成多產業歸類與深度極精闢盤勢剖析"""
     api_key = (os.environ.get("GEMINI_API_KEY") or "").strip()
     if not api_key:
         raise RuntimeError("缺少 GEMINI_API_KEY，無法呼叫 Gemini API。")
 
     client = genai.Client(api_key=api_key, vertexai=False)
     tz_tw = datetime.timezone(datetime.timedelta(hours=8))
-    today_str = datetime.datetime.now(tz_tw).strftime("%Y/%m/%d")
+    now_tw = datetime.datetime.now(tz_tw)
+    
+    # 星期轉換
+    weekdays = ["一", "二", "三", "四", "五", "六", "日"]
+    weekday_str = weekdays[now_tw.weekday()]
+    date_header_str = now_tw.strftime(f"%Y/%m/%d ({weekday_str})")
+
     news_text = "\n".join([f"- {title}" for title in news_titles])
 
     prompt = f"""
-今天是 {today_str}。以下是搜集到的最新今早市場焦點新聞：
+今天是 {date_header_str}。以下是搜集到的最新今早市場焦點新聞：
 {news_text}
 
 請扮演華爾街/頂尖投顧的首席台股策略分析師，針對上述大量新聞進行【多產業精準歸納】與【深度精闢盤勢分析】。
 
 請撰寫一份專供 LINE 手機閱讀的【台股全產業盤前 AI 智算晨報】。
 
-格式與內容要求：
-1. **標題與日期**：加上視覺 Icon 排版。
-2. **多產業重點歸納（請歸納出至少 5-6 個不同產業別）**：
-   例如：【半導體/先進封裝】、【AI伺服器/組裝/散熱】、【IC設計/矽智財】、【光通訊/CPO】、【記憶體/被動元件】、【金融/傳產/政策題材】等。
-   - 每個產業別下，請根據新聞列出 2-3 個關鍵動向與供應鏈利多/利空摘要。
-3. **AI 首席分析師深度精闢剖析（請分 3 個維度撰寫，內容要具體、有深度、不寫套話）**：
-   - 💡 **【資金流向與夜盤/美股連動】**：剖析外資/主力資金動向、美股/ADR/夜盤對台股開盤之影響。
-   - ⚡ **【關鍵族群與題材急單動向】**：深入解讀今日最有機會發動或需避險的族群（如 CoWoS 設備、浸沒散熱、水冷、CPO、伺服器急單等）。
-   - 🎯 **【盤前具體操作與避險策略】**：給出明確的支撐壓力看法、開盤應對（如高開如何處理、逢低布局哪些績優股、停損停利點落何處）。
+格式與視覺嚴格要求：
+1. **嚴禁使用任何 Markdown 格式語法**：絕對不可出現三井號(###)、雙星號(**)、分隔線(---)或井號(#)。請完全用 Emoji 與空格/換行來做區塊視覺排版。
+2. **第一行必須嚴格為**：
+📅 {date_header_str} 📊 【台股產業盤前AI分析晨報】
 
-請使用輕鬆但極專業的語氣，善用 Emoji 排版，讓手機閱讀體驗極佳。
+3. **重點產業歸納（請歸納出至少 5-6 個不同產業別）**：
+   - 使用漂亮的 Emoji 作為分類頭（例如：🔹【半導體/先進封裝】、🔹【AI伺服器/散熱/組裝】、🔹【IC設計/矽智財】、🔹【光通訊/CPO】、🔹【記憶體/被動元件】、🔹【金融/傳產/政策題材】）。
+   - 每個產業別下，列出 2-3 個關鍵動向與供應鏈利多/利空摘要。
 
-直接輸出 LINE 文字內容即可，不需要任何分隔符號或額外說明。
+4. **AI 首席分析師深度精闢剖析（請分 3 個維度撰寫，內容要具體、有深度、不寫套話）**：
+   - 💡【資金流向與夜盤/美股連動】
+   - ⚡【關鍵族群與題材急單動向】
+   - 🎯【盤前具體操作與避險策略】
+
+5. **最後一行必須嚴格為**：
+📈 我是來自台北的AI寶，祝您有個美好的一天！
+
+直接輸出 LINE 文字內容，請確保視覺體驗乾淨俐落、圖案豐富且完全無 Markdown 符號。
 """
 
     models_to_try = ["gemini-3.6-flash", "gemini-2.5-flash"]
@@ -84,6 +93,8 @@ def generate_deep_text_report(news_titles):
             text = getattr(result, "text", None) or getattr(result, "output_text", None)
             if text:
                 report_text = text.strip()
+                # 再次清理可能遺漏的 markdown 符號
+                report_text = report_text.replace("**", "").replace("###", "").replace("---", "")
                 print(f"成功使用 [{model_name}] 完成深度分析！")
                 break
         except Exception as e:
@@ -109,7 +120,6 @@ def send_line_text_broadcast(line_text):
         "Authorization": f"Bearer {line_token}",
     }
 
-    # 只發送純文字訊息，速度極快且不占空間
     payload = {
         "messages": [
             {
@@ -121,7 +131,7 @@ def send_line_text_broadcast(line_text):
 
     response = requests.post(url, headers=headers, json=payload)
     if response.status_code == 200:
-        print("LINE 純文字深度晨報推播成功發送！")
+        print("LINE 純文字晨報成功發送！")
     else:
         print(f"LINE 發送失敗：{response.status_code}, {response.text}")
 
