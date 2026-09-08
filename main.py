@@ -91,9 +91,9 @@ AI智算盤勢解析
 
     # 配置輪詢模型清單，自動備援切換 (3.6 -> 2.5 -> 1.5)
     models_to_try = [
-        "gemini-3.6-flash",
         "gemini-2.5-flash",
-        "gemini-1.5-flash"
+        "gemini-1.5-flash",
+        "gemini-2.0-flash"
     ]
     
     script_raw = None
