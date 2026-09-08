@@ -2,9 +2,8 @@ name: Daily Taiwan Stock Report
 
 on:
   schedule:
-    # 台灣時間 06:40 執行 (UTC 時間為 22:40)
     - cron: '40 22 * * *'
-  workflow_dispatch: # 允許手動觸發
+  workflow_dispatch:
 
 jobs:
   build:
@@ -18,15 +17,15 @@ jobs:
         with:
           python-version: '3.10'
 
-      # 1. 強制設定系統時區為台北時間
       - name: Set Timezone
         run: sudo timedatectl set-timezone Asia/Taipei
 
-      # 2. 安裝 Linux 中文字型，解決 WeasyPrint 渲染中文字變成亂碼/方塊問題
-      - name: Install Chinese Fonts & Dependencies
+      # 強制安裝全套中文字型並重建字型快取 (Fontconfig Cache)
+      - name: Install Chinese Fonts & Rebuild Font Cache
         run: |
           sudo apt-get update
-          sudo apt-get install -y fonts-noto-cjk libpango-1.0-0 libharfbuzz0b libpangoft2-1.0-0
+          sudo apt-get install -y fonts-noto-cjk fonts-wqy-zenhei fonts-wqy-microhei libpango-1.0-0 libharfbuzz0b libpangoft2-1.0-0
+          sudo fc-cache -fv
 
       - name: Install Python dependencies
         run: |
