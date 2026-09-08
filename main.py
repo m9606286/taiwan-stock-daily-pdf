@@ -107,7 +107,7 @@ def generate_video_script_and_cards(news_titles):
 3. 務必精確使用「===CARD===」分隔 4 個區塊。
 """
 
-    models_to_try = ["gemini-2.5-flash", "gemini-2.0-flash"]
+    models_to_try = ["gemini-3.6-flash", "gemini-2.5-flash"]
     script_raw = None
     last_error = None
 
