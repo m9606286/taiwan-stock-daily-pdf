@@ -61,7 +61,7 @@ def _is_retryable_gemini_error(error):
 
 
 def generate_video_script_and_cards(news_titles):
-    """由 Gemini 生成 2 分鐘腳本，並結構化拆分為 4 個主題圖卡內容"""
+    """由 Gemini 生成 2 分鐘腳本，並拆分為 4 個主題圖卡內容"""
     api_key = (os.environ.get("GEMINI_API_KEY") or "").strip()
     if not api_key:
         raise RuntimeError("缺少 GEMINI_API_KEY，無法呼叫 Gemini Developer API。")
@@ -72,41 +72,39 @@ def generate_video_script_and_cards(news_titles):
     news_text = "\n".join([f"- {title}" for title in news_titles])
 
     prompt = f"""
-今天是 {today_str}。以下是今日清晨最新財經頭條：
+今天是 {today_str}。以下是今日最新財經頭條：
 {news_text}
 
 請扮演專業台股財經主播，將上述頭條製作成一份約 500-600 字的【2 分鐘完整影音口播腳本】。
 
 請嚴格按照以下【4 個區塊】輸出，區塊之間用「===CARD===」分隔：
 
-卡片1【盤前開場】：
-標題：今日盤前核心主軸
-內文：開場問好、總覽今日市場焦點與整體氣氛。
+盤前核心主軸
+各位觀眾朋友早上好，歡迎收看今天的台股財經早報...（此處撰寫開場總覽）
 
 ===CARD===
 
-卡片2【即時新聞重點】：
-標題：重點財經頭條
-內文：播報今日最關鍵的 3 則頭條新聞重點。
+即時頭條焦點
+今日最關鍵的三則財經焦點動態...（此處撰寫重點新聞播報）
 
 ===CARD===
 
-卡片3【AI 深度觀點】：
-標題：AI 智算盤勢解析
-內文：進行 AI 綜合分析，剖析對台股大盤、半導體供應鏈或熱門概念股的影響。
+AI智算盤勢解析
+進行AI深度綜合剖析，解讀對台股與科技產業影響...（此處撰寫產業觀點）
 
 ===CARD===
 
-卡片4【今日觀察與風險】：
-標題：策略建議與風險提示
-內文：提供投資人今日盤中觀察重點、操作策略與風險警示。
+策略建議與風險提示
+提供今日盤中觀察重點與操作風險提示...（此處撰寫結尾建議）
 
-格式嚴格要求：
-1. 語氣自然流暢、專業且抑揚頓挫。
-2. 嚴格禁止使用任何 Markdown 符號（如 **、#、-、*）、表情符號或英文特殊字元，僅輸出純繁體中文。
-3. 務必精確使用「===CARD===」分隔 4 個區塊。
+格式要求：
+1. 每個卡片第一行為「標題」（10字以內），第二行起為「口播內文」。
+2. 絕對不要出現「標題：」、「內文：」、「卡片1：」等標籤文字。
+3. 語氣專業順暢，嚴格禁止使用任何 Markdown 符號（如 **、#、-、*）、表情符號，僅輸出純繁體中文。
+4. 務必使用「===CARD===」分隔 4 個區塊。
 """
 
+    # 使用最新的 Gemini 3.6 Flash 模型
     models_to_try = ["gemini-3.6-flash", "gemini-2.5-flash"]
     script_raw = None
     last_error = None
@@ -142,22 +140,23 @@ def generate_video_script_and_cards(news_titles):
     cards_data = []
 
     for idx, card_text in enumerate(raw_cards):
-        clean_text = re.sub(r"[^\w\s\u4e00-\u9fa5，。！？；：]", "", card_text).strip()
-        lines = [line.strip() for line in clean_text.splitlines() if line.strip()]
+        lines = [l.strip() for l in card_text.strip().splitlines() if l.strip()]
+        if not lines:
+            continue
         
-        title = f"卡片 {idx+1}"
-        body = clean_text
-        
-        if lines:
-            if "標題" in lines[0]:
-                title = lines[0].replace("標題", "").strip()
-                body = "".join(lines[1:])
-            else:
-                title = lines[0][:10]
-                body = "".join(lines)
-                
-        body = re.sub(r"^(內文|卡片\d+)", "", body).strip()
-        cards_data.append({"title": title, "body": body})
+        # 提取第一行為標題，其餘為內文
+        raw_title = lines[0]
+        raw_body = "".join(lines[1:]) if len(lines) > 1 else lines[0]
+
+        # 清除前綴贅字
+        clean_title = re.sub(r"^(標題|卡片\d+|區塊\d+)[:：\s]*", "", raw_title).strip()
+        clean_body = re.sub(r"^(內文|標題)[:：\s]*", "", raw_body).strip()
+        clean_body = re.sub(r"[^\w\s\u4e00-\u9fa5，。！？；：]", "", clean_body).strip()
+
+        cards_data.append({
+            "title": clean_title[:12] if clean_title else f"重點解析 {idx+1}",
+            "body": clean_body
+        })
 
     # 確保剛好 4 張
     while len(cards_data) < 4:
@@ -176,101 +175,89 @@ async def text_to_speech(text, output_file="narration.mp3"):
     await communicate.save(output_file)
 
 
-def draw_3d_card(title, body_text, card_num, total_cards=4, output_img="card.png"):
-    """使用 Pillow 繪製具有 3D 浮雕、玻璃質感與科技光效的 9:16 短影音圖卡 (1080x1920)"""
-    width, height = 1080, 1920
-    
-    # 1. 建立深色科技風背景漸層 (Dark Cyberpunk Gradient)
-    base = Image.new("RGBA", (width, height), (11, 19, 41, 255))
+def create_fallback_3d_template(width=1080, height=1920):
+    """當找不到 template.png 時，備用的 3D 科技感底圖生成器"""
+    base = Image.new("RGBA", (width, height), (10, 16, 35, 255))
     draw = ImageDraw.Draw(base)
 
-    # 背景幾何光暈裝飾 (Glow effect)
+    # 青藍/紫藍底層光暈
     glow = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     glow_draw = ImageDraw.Draw(glow)
-    # 頂部青藍光暈
-    glow_draw.ellipse([(-200, -200), (800, 800)], fill=(56, 189, 248, 40))
-    # 底部藍紫光暈
-    glow_draw.ellipse([(400, 1100), (1300, 2000)], fill=(139, 92, 246, 35))
-    glow = glow.filter(ImageFilter.GaussianBlur(100))
+    glow_draw.ellipse([(-100, -100), (900, 900)], fill=(0, 180, 255, 45))
+    glow_draw.ellipse([(200, 1000), (1200, 2000)], fill=(120, 50, 255, 35))
+    glow = glow.filter(ImageFilter.GaussianBlur(80))
     base = Image.alpha_composite(base, glow)
+
+    draw = ImageDraw.Draw(base)
+    # 頂部科技抬頭
+    draw.text((90, 80), "AI 盤前極速總研", fill="#00E5FF")
+    # 中央玻璃框邊框
+    draw.rounded_rectangle([60, 270, 1020, 1750], radius=30, fill=(15, 23, 42, 220), outline="#00E5FF", width=3)
+    return base
+
+
+def draw_3d_card(title, body_text, card_num, total_cards=4, output_img="card.png"):
+    """渲染 3D 炫彩科技風圖卡"""
+    width, height = 1080, 1920
+    
+    # 1. 載入 3D 模板或自動生成備用模板
+    template_path = "template.png"
+    if os.path.exists(template_path):
+        base = Image.open(template_path).convert("RGBA")
+        if base.size != (width, height):
+            base = base.resize((width, height), Image.Resampling.LANCZOS)
+    else:
+        base = create_fallback_3d_template(width, height)
+
     draw = ImageDraw.Draw(base)
 
-    # 字型載入
-    font_candidates = [
-        "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
-        r"C:\Windows\Fonts\msjh.ttc",
-        r"C:\Windows\Fonts\msyh.ttc",
-    ]
-    title_font = sub_font = body_font = card_tag_font = None
-    for font_path in font_candidates:
-        try:
-            title_font = ImageFont.truetype(font_path, 64)
-            sub_font = ImageFont.truetype(font_path, 42)
-            body_font = ImageFont.truetype(font_path, 46)
-            card_tag_font = ImageFont.truetype(font_path, 32)
-            break
-        except OSError:
-            continue
-    if title_font is None:
-        title_font = sub_font = body_font = card_tag_font = ImageFont.load_default()
+    # 2. 清理與重繪中央面板內文區域 (消除舊範例文字，保持乾淨背景)
+    # 面板邊界: left=70, top=410, right=1010, bottom=1620
+    draw.rectangle([75, 410, 1005, 1620], fill=(10, 18, 38, 255))
+
+    # 3. 字型設定
+    font_path = "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc"
+    if not os.path.exists(font_path):
+        font_path = r"C:\Windows\Fonts\msjh.ttc"  # Windows 微軟正黑體備用
+
+    try:
+        title_font = ImageFont.truetype(font_path, 48)
+        body_font = ImageFont.truetype(font_path, 42)
+        sub_font = ImageFont.truetype(font_path, 30)
+    except OSError:
+        title_font = body_font = sub_font = ImageFont.load_default()
 
     tz_tw = datetime.timezone(datetime.timedelta(hours=8))
     today_str = datetime.datetime.now(tz_tw).strftime("%Y/%m/%d")
 
-    # 2. 頂部抬頭區塊
-    draw.text((80, 110), "AI 盤前極速總研", font=title_font, fill="#38bdf8")
-    draw.text((80, 200), f"📅 {today_str} ｜ 全方位財經智算", font=sub_font, fill="#94a3b8")
+    # 4. 動態更新日期與頁碼標籤 (覆蓋上標區域)
+    draw.rectangle([210, 190, 390, 230], fill=(10, 18, 38, 255))
+    draw.text((215, 195), today_str, font=sub_font, fill="#94A3B8")
 
-    # 頁碼標籤 (例: 01 / 04)
     tag_text = f"STEP {card_num:02d} / {total_cards:02d}"
-    draw.rectangle([(800, 120), (1000, 180)], fill=(30, 41, 59, 200), outline="#38bdf8", width=2)
-    draw.text((820, 133), tag_text, font=card_tag_font, fill="#38bdf8")
+    draw.rectangle([780, 85, 980, 130], fill=(10, 18, 38, 255))
+    draw.text((785, 90), tag_text, font=sub_font, fill="#00E5FF")
 
-    # 3. 繪製 3D 立體玻璃感卡片主體 (3D Glassmorphism Box)
-    box_x1, box_y1 = 60, 280
-    box_x2, box_y2 = 1020, 1780
-    corner_radius = 35
+    # 5. 渲染中央 3D 金屬框標題
+    # 覆蓋舊標題欄位
+    draw.rectangle([220, 275, 860, 345], fill=(15, 25, 50, 255))
+    display_title = f"【 {title} 】"
+    
+    # 標題居中計算
+    title_bbox = draw.textbbox((0, 0), display_title, font=title_font)
+    title_w = title_bbox[2] - title_bbox[0]
+    title_x = (width - title_w) // 2
+    
+    # 標題金色立體發光陰影
+    draw.text((title_x + 2, 287), display_title, font=title_font, fill="#8B6508")
+    draw.text((title_x, 285), display_title, font=title_font, fill="#FFD700")
 
-    # 3D 陰影層 (Drop Shadow)
-    shadow = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-    shadow_draw = ImageDraw.Draw(shadow)
-    shadow_draw.rounded_rectangle(
-        [box_x1 + 15, box_y1 + 20, box_x2 + 15, box_y2 + 20],
-        radius=corner_radius,
-        fill=(0, 0, 0, 160)
-    )
-    shadow = shadow.filter(ImageFilter.GaussianBlur(25))
-    base = Image.alpha_composite(base, shadow)
+    # 6. 動態排版與渲染內文
+    box_x1, box_x2 = 100, 980
+    max_width = box_x2 - box_x1
 
-    # 3D 半透明玻璃主體
-    glass = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-    glass_draw = ImageDraw.Draw(glass)
-    glass_draw.rounded_rectangle(
-        [box_x1, box_y1, box_x2, box_y2],
-        radius=corner_radius,
-        fill=(15, 23, 42, 210),
-        outline="#38bdf8",
-        width=3
-    )
-    # 卡片頂部高光邊條 (3D Bevel Light Effect)
-    glass_draw.rounded_rectangle(
-        [box_x1 + 3, box_y1 + 3, box_x2 - 3, box_y1 + 15],
-        radius=corner_radius,
-        fill=(255, 255, 255, 40)
-    )
-    base = Image.alpha_composite(base, glass)
-    draw = ImageDraw.Draw(base)
-
-    # 4. 卡片內部標題與裝飾
-    draw.text((110, 340), f"【 {title} 】", font=title_font, fill="#f8fafc")
-    draw.line([(110, 430), (970, 430)], fill="#0284c7", width=3)
-
-    # 5. 排版內文
-    margin = 110
-    max_width = box_x2 - box_x1 - 100
     lines = []
     current_line = ""
-
     for char in body_text:
         test_line = current_line + char
         bbox = draw.textbbox((0, 0), test_line, font=body_font)
@@ -279,23 +266,25 @@ def draw_3d_card(title, body_text, card_num, total_cards=4, output_img="card.png
         else:
             lines.append(current_line)
             current_line = char
-    lines.append(current_line)
+    if current_line:
+        lines.append(current_line)
 
-    y_offset = 480
-    for line in lines[:18]:
-        # 給文字加上微微立體文字陰影
-        draw.text((margin + 2, y_offset + 2), line, font=body_font, fill="#0f172a")
-        draw.text((margin, y_offset), line, font=body_font, fill="#e2e8f0")
-        y_offset += 68
+    # 每頁最多繪製 15 行，確保不超出 3D 金屬面板邊框
+    y_offset = 430
+    line_height = 66
 
-    # 底部裝飾條
-    draw.rectangle([(80, 1810), (1000, 1815)], fill="#38bdf8")
+    for line in lines[:15]:
+        # 黑色文字底影，創造立體浮雕感
+        draw.text((box_x1 + 2, y_offset + 2), line, font=body_font, fill="#000000")
+        # 主體清晰白字
+        draw.text((box_x1, y_offset), line, font=body_font, fill="#F8FAFC")
+        y_offset += line_height
 
     base.convert("RGB").save(output_img)
 
 
 def render_multi_card_video(cards_data, audio_file="narration.mp3", output_mp4="daily_report.mp4"):
-    """渲染多頁動態切換圖卡的 MP4 影片（MoviePy 2.0+ 相容）"""
+    """渲染多頁動態切換 3D 圖卡的 2 分鐘 MP4 影片"""
     audio = AudioFileClip(audio_file)
     total_duration = audio.duration
     num_cards = len(cards_data)
@@ -306,7 +295,7 @@ def render_multi_card_video(cards_data, audio_file="narration.mp3", output_mp4="
         img_filename = f"card_{idx+1}.png"
         draw_3d_card(card["title"], card["body"], card_num=idx+1, total_cards=num_cards, output_img=img_filename)
         
-        # 動態計算最後一張圖卡的時間補齊
+        # 計算每張卡片播放時間
         dur = per_card_duration if idx < num_cards - 1 else (total_duration - per_card_duration * (num_cards - 1))
         clip = ImageClip(img_filename).with_duration(dur)
         clips.append(clip)
@@ -336,10 +325,10 @@ def send_line_broadcast():
 
     tz_tw = datetime.timezone(datetime.timedelta(hours=8))
     today_short = datetime.datetime.now(tz_tw).strftime("%m/%d").lstrip("0").replace("/0", "/")
-    timestamp = int(time.time())
 
-    video_url = f"https://cdn.jsdelivr.net/gh/m9606286/taiwan-stock-daily-pdf@main/daily_report.mp4?v={timestamp}"
-    preview_url = f"https://cdn.jsdelivr.net/gh/m9606286/taiwan-stock-daily-pdf@main/card_1.png?v={timestamp}"
+    # 移除網址末端 ?v= 參數，讓 LINE 伺服器能 100% 讀取與播放 MP4 檔案
+    video_url = "https://cdn.jsdelivr.net/gh/m9606286/taiwan-stock-daily-pdf@main/daily_report.mp4"
+    preview_url = "https://cdn.jsdelivr.net/gh/m9606286/taiwan-stock-daily-pdf@main/card_1.png"
 
     payload = {
         "messages": [
@@ -366,7 +355,7 @@ if __name__ == "__main__":
     print("1. 抓取最新財經頭條...")
     news = fetch_latest_stock_news()
 
-    print("2. Gemini 生成 2 分鐘深度腳本與 4 張圖卡結構...")
+    print("2. Gemini (3.6-flash) 生成 2 分鐘深度腳本與 4 張圖卡結構...")
     cards, audio_script = generate_video_script_and_cards(news)
 
     print("3. 合成 2 分鐘高音質語音 (Edge-TTS)...")
