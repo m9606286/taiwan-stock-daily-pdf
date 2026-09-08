@@ -89,7 +89,7 @@ AI智算盤勢解析
 4. 務必使用「===CARD===」分隔 4 個區塊。
 """
 
-    # 配置輪詢模型清單，確保 404 (失效) 或 429 (配額額滿) 時自動備援切換
+    # 配置輪詢模型清單，自動備援切換 (3.6 -> 2.5 -> 1.5)
     models_to_try = [
         "gemini-3.6-flash",
         "gemini-2.5-flash",
@@ -113,15 +113,12 @@ AI智算盤勢解析
                 break
         except Exception as e:
             last_error = e
-            err_msg = str(e)
-            print(f"模型 [{model_name}] 呼叫失敗: {err_msg}")
-            # 當遭遇 404 停用、429 配額額滿或 RESOURCE_EXHAUSTED，自動跳過切換下一個模型
+            print(f"模型 [{model_name}] 呼叫失敗: {e}")
             continue
 
     if not script_raw:
         raise RuntimeError(f"所有 Gemini 模型呼叫失敗，最後錯誤: {last_error}")
 
-    # 解析 4 張卡片內容
     raw_cards = script_raw.split("===CARD===")
     cards_data = []
 
@@ -133,7 +130,6 @@ AI智算盤勢解析
         raw_title = lines[0]
         raw_body = "".join(lines[1:]) if len(lines) > 1 else lines[0]
 
-        # 清除前綴贅字與標籤
         clean_title = re.sub(r"^(標題|卡片\d+|區塊\d+)[:：\s]*", "", raw_title).strip()
         clean_body = re.sub(r"^(內文|標題)[:：\s]*", "", raw_body).strip()
         clean_body = re.sub(r"[^\w\s\u4e00-\u9fa5，。！？；：]", "", clean_body).strip()
@@ -143,7 +139,6 @@ AI智算盤勢解析
             "body": clean_body
         })
 
-    # 確保剛好 4 張卡片
     while len(cards_data) < 4:
         cards_data.append({"title": "市場觀察", "body": "祝您今日投資順利，掌握市場先機。"})
     cards_data = cards_data[:4]
@@ -162,8 +157,6 @@ async def text_to_speech(text, output_file="narration.mp3"):
 def create_fallback_3d_template(width=1080, height=1920):
     """當找不到 template.png 時的備用 3D 科技底圖"""
     base = Image.new("RGBA", (width, height), (10, 16, 35, 255))
-    draw = ImageDraw.Draw(base)
-
     glow = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     glow_draw = ImageDraw.Draw(glow)
     glow_draw.ellipse([(-100, -100), (900, 900)], fill=(0, 180, 255, 45))
@@ -178,10 +171,9 @@ def create_fallback_3d_template(width=1080, height=1920):
 
 
 def draw_3d_card(title, body_text, card_num, total_cards=4, output_img="card.png"):
-    """渲染 3D 炫彩科技風圖卡"""
+    """渲染 3D 炫彩科技風圖卡並同步輸出預覽圖"""
     width, height = 1080, 1920
     
-    # 1. 載入 3D 模板或自動生成備用模板
     template_path = "template.png"
     if os.path.exists(template_path):
         base = Image.open(template_path).convert("RGBA")
@@ -191,11 +183,8 @@ def draw_3d_card(title, body_text, card_num, total_cards=4, output_img="card.png
         base = create_fallback_3d_template(width, height)
 
     draw = ImageDraw.Draw(base)
-
-    # 2. 清理中段面板背景（覆蓋掉舊圖片的預設文字）
     draw.rectangle([75, 410, 1005, 1620], fill=(10, 18, 38, 255))
 
-    # 3. 字型設定
     font_path = "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc"
     if not os.path.exists(font_path):
         font_path = r"C:\Windows\Fonts\msjh.ttc"
@@ -210,7 +199,6 @@ def draw_3d_card(title, body_text, card_num, total_cards=4, output_img="card.png
     tz_tw = datetime.timezone(datetime.timedelta(hours=8))
     today_str = datetime.datetime.now(tz_tw).strftime("%Y/%m/%d")
 
-    # 4. 動態寫入頂部日期與卡片計數
     draw.rectangle([210, 190, 390, 230], fill=(10, 18, 38, 255))
     draw.text((215, 195), today_str, font=sub_font, fill="#94A3B8")
 
@@ -218,7 +206,6 @@ def draw_3d_card(title, body_text, card_num, total_cards=4, output_img="card.png
     draw.rectangle([780, 85, 980, 130], fill=(10, 18, 38, 255))
     draw.text((785, 90), tag_text, font=sub_font, fill="#00E5FF")
 
-    # 5. 渲染 3D 金屬標題
     draw.rectangle([220, 275, 860, 345], fill=(15, 25, 50, 255))
     display_title = f"【 {title} 】"
     
@@ -226,11 +213,9 @@ def draw_3d_card(title, body_text, card_num, total_cards=4, output_img="card.png
     title_w = title_bbox[2] - title_bbox[0]
     title_x = (width - title_w) // 2
     
-    # 標題金色立體發光效果
     draw.text((title_x + 2, 287), display_title, font=title_font, fill="#8B6508")
     draw.text((title_x, 285), display_title, font=title_font, fill="#FFD700")
 
-    # 6. 動態排版與繪製內文
     box_x1, box_x2 = 100, 980
     max_width = box_x2 - box_x1
 
@@ -255,7 +240,12 @@ def draw_3d_card(title, body_text, card_num, total_cards=4, output_img="card.png
         draw.text((box_x1, y_offset), line, font=body_font, fill="#F8FAFC")
         y_offset += line_height
 
+    # 1. 儲存卡片圖片
     base.convert("RGB").save(output_img)
+    
+    # 2. 如果是第一張卡片，同步存一份 cover.png 確保 LINE 有預覽圖
+    if output_img == "card_1.png" or card_num == 1:
+        base.convert("RGB").save("cover.png")
 
 
 def render_multi_card_video(cards_data, audio_file="narration.mp3", output_mp4="daily_report.mp4"):
@@ -299,9 +289,12 @@ def send_line_broadcast():
 
     tz_tw = datetime.timezone(datetime.timedelta(hours=8))
     today_short = datetime.datetime.now(tz_tw).strftime("%m/%d").lstrip("0").replace("/0", "/")
+    
+    # 時間戳記避開 CDN 與 LINE 的快取問題
+    timestamp = int(time.time())
 
-    video_url = "https://cdn.jsdelivr.net/gh/m9606286/taiwan-stock-daily-pdf@main/daily_report.mp4"
-    preview_url = "https://cdn.jsdelivr.net/gh/m9606286/taiwan-stock-daily-pdf@main/card_1.png"
+    video_url = f"https://raw.githubusercontent.com/m9606286/taiwan-stock-daily-pdf/main/daily_report.mp4?v={timestamp}"
+    preview_url = f"https://raw.githubusercontent.com/m9606286/taiwan-stock-daily-pdf/main/cover.png?v={timestamp}"
 
     payload = {
         "messages": [
