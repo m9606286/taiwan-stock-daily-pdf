@@ -2,13 +2,10 @@ import os
 import time
 import re
 import datetime
-import asyncio
 import requests
 import feedparser
-import edge_tts
 from google import genai
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
-from moviepy import AudioFileClip, ImageClip, concatenate_videoclips
 
 
 def fetch_latest_stock_news():
@@ -45,11 +42,11 @@ def fetch_latest_stock_news():
     return clean_titles
 
 
-def generate_video_script_and_cards(news_titles):
-    """由 Gemini 生成 2 分鐘腳本，並拆分為 4 個主題圖卡內容"""
+def generate_report_content(news_titles):
+    """由 Gemini 生成精簡重點分析與新聞條列"""
     api_key = (os.environ.get("GEMINI_API_KEY") or "").strip()
     if not api_key:
-        raise RuntimeError("缺少 GEMINI_API_KEY，無法呼叫 Gemini Developer API。")
+        raise RuntimeError("缺少 GEMINI_API_KEY，無法呼叫 Gemini API。")
 
     client = genai.Client(api_key=api_key, vertexai=False)
     tz_tw = datetime.timezone(datetime.timedelta(hours=8))
@@ -60,102 +57,75 @@ def generate_video_script_and_cards(news_titles):
 今天是 {today_str}。以下是今日最新財經頭條：
 {news_text}
 
-請扮演專業台股財經主播，將上述頭條製作成一份約 500-600 字的【2 分鐘完整影音口播腳本】。
-
-請嚴格按照以下【4 個區塊】輸出，區塊之間用「===CARD===」分隔：
-
-盤前核心主軸
-各位觀眾朋友早上好，歡迎收看今天的台股財經早報...（此處撰寫開場總覽）
-
-===CARD===
-
-即時頭條焦點
-今日最關鍵的三則財經焦點動態...（此處撰寫重點新聞播報）
-
-===CARD===
-
-AI智算盤勢解析
-進行AI深度綜合剖析，解讀對台股與科技產業影響...（此處撰寫產業觀點）
-
-===CARD===
-
-策略建議與風險提示
-提供今日盤中觀察重點與操作風險提示...（此處撰寫結尾建議）
+請扮演專業台股財經分析師，根據上述新聞撰寫一份【台股盤前 AI 智算晨報】。
 
 格式要求：
-1. 每個卡片第一行為「標題」（10字以內），第二行起為「口播內文」。
-2. 絕對不要出現「標題：」、「內文：」、「卡片1：」等標籤文字。
-3. 語氣專業順暢，嚴格禁止使用任何 Markdown 符號（如 **、#、-、*）、表情符號，僅輸出純繁體中文。
-4. 務必使用「===CARD===」分隔 4 個區塊。
+1. 第一行：圖卡核心標題（12字以內，重點摘要，例如：AI半導體領漲 關注夜盤波動）。
+2. 第二行起：圖卡內文（約 150-200 字，分析盤勢重點與操作建議，請分為 3 個重點短段落）。
+3. 第三部分：LINE 純文字訊息內容（包含開場招呼、重點新聞與分析）。
+
+請用「===SPLIT===」將【圖卡內容】與【LINE文字訊息】分開。
+
+範例輸出：
+AI強勢領漲 聚焦台積電與夜盤
+昨日美股強勁反彈，台積電ADR大漲帶動市場信心。
+AI伺服器供應鏈獲利動能明確，盤中留意大盤成交量變化。
+操作上建議逢低布局核心權值股，嚴格設好停損。
+===SPLIT===
+📊 【AI 智算台股盤前晨報】
+📅 日期：{today_str}
+
+🔥 今日核心頭條：
+1. {news_titles[0] if len(news_titles) > 0 else '焦點新聞'}
+2. {news_titles[1] if len(news_titles) > 1 else '焦點新聞'}
+
+💡 盤前重點剖析：
+美股與夜盤表現強勁，AI供應鏈持續成為盤面主軸。建議投資人密切關注成交量與族群輪動。
+
+祝您今日投資順利！
 """
 
-    # 配置輪詢模型清單，自動備援切換 (3.6 -> 2.5 -> 1.5)
-    models_to_try = [
-        "gemini-2.5-flash",
-        "gemini-1.5-flash",
-        "gemini-2.0-flash"
-    ]
+    models_to_try = ["gemini-2.5-flash", "gemini-1.5-flash", "gemini-2.0-flash"]
     
-    script_raw = None
+    report_raw = None
     last_error = None
 
     for model_name in models_to_try:
         try:
-            print(f"嘗試使用模型 [{model_name}] 生成 2 分鐘腳本...")
+            print(f"嘗試使用 Gemini 模型 [{model_name}]...")
             result = client.models.generate_content(
                 model=model_name,
                 contents=prompt,
             )
             text = getattr(result, "text", None) or getattr(result, "output_text", None)
             if text:
-                script_raw = text
-                print(f"成功使用 [{model_name}] 生成腳本！")
+                report_raw = text
+                print(f"成功使用 [{model_name}] 生成內容！")
                 break
         except Exception as e:
             last_error = e
-            print(f"模型 [{model_name}] 呼叫失敗: {e}")
+            print(f"模型 [{model_name}] 失敗: {e}")
             continue
 
-    if not script_raw:
+    if not report_raw:
         raise RuntimeError(f"所有 Gemini 模型呼叫失敗，最後錯誤: {last_error}")
 
-    raw_cards = script_raw.split("===CARD===")
-    cards_data = []
+    parts = report_raw.split("===SPLIT===")
+    card_raw = parts[0].strip()
+    line_text = parts[1].strip() if len(parts) > 1 else card_raw
 
-    for idx, card_text in enumerate(raw_cards):
-        lines = [l.strip() for l in card_text.strip().splitlines() if l.strip()]
-        if not lines:
-            continue
-        
-        raw_title = lines[0]
-        raw_body = "".join(lines[1:]) if len(lines) > 1 else lines[0]
+    card_lines = [l.strip() for l in card_raw.splitlines() if l.strip()]
+    card_title = card_lines[0] if card_lines else "台股盤前重點解析"
+    card_body = "\n".join(card_lines[1:]) if len(card_lines) > 1 else card_title
 
-        clean_title = re.sub(r"^(標題|卡片\d+|區塊\d+)[:：\s]*", "", raw_title).strip()
-        clean_body = re.sub(r"^(內文|標題)[:：\s]*", "", raw_body).strip()
-        clean_body = re.sub(r"[^\w\s\u4e00-\u9fa5，。！？；：]", "", clean_body).strip()
+    # 清理非文字符號
+    card_title = re.sub(r"[^\w\s\u4e00-\u9fa5]", "", card_title)[:14]
 
-        cards_data.append({
-            "title": clean_title[:12] if clean_title else f"重點解析 {idx+1}",
-            "body": clean_body
-        })
-
-    while len(cards_data) < 4:
-        cards_data.append({"title": "市場觀察", "body": "祝您今日投資順利，掌握市場先機。"})
-    cards_data = cards_data[:4]
-
-    full_audio_script = " ".join([c["body"] for c in cards_data])
-    return cards_data, full_audio_script
-
-
-async def text_to_speech(text, output_file="narration.mp3"):
-    """使用 Edge TTS 生成高音質繁體中文語音"""
-    voice = "zh-TW-HsiaoChenNeural"
-    communicate = edge_tts.Communicate(text, voice)
-    await communicate.save(output_file)
+    return card_title, card_body, line_text
 
 
 def create_fallback_3d_template(width=1080, height=1920):
-    """當找不到 template.png 時的備用 3D 科技底圖"""
+    """預設 3D 科技感底圖"""
     base = Image.new("RGBA", (width, height), (10, 16, 35, 255))
     glow = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     glow_draw = ImageDraw.Draw(glow)
@@ -170,8 +140,8 @@ def create_fallback_3d_template(width=1080, height=1920):
     return base
 
 
-def draw_3d_card(title, body_text, card_num, total_cards=4, output_img="card.png"):
-    """渲染 3D 炫彩科技風圖卡並同步輸出預覽圖"""
+def draw_3d_card(title, body_text, output_img="cover.png"):
+    """繪製高質感晨報圖卡"""
     width, height = 1080, 1920
     
     template_path = "template.png"
@@ -190,8 +160,8 @@ def draw_3d_card(title, body_text, card_num, total_cards=4, output_img="card.png
         font_path = r"C:\Windows\Fonts\msjh.ttc"
 
     try:
-        title_font = ImageFont.truetype(font_path, 48)
-        body_font = ImageFont.truetype(font_path, 42)
+        title_font = ImageFont.truetype(font_path, 46)
+        body_font = ImageFont.truetype(font_path, 40)
         sub_font = ImageFont.truetype(font_path, 30)
     except OSError:
         title_font = body_font = sub_font = ImageFont.load_default()
@@ -199,16 +169,16 @@ def draw_3d_card(title, body_text, card_num, total_cards=4, output_img="card.png
     tz_tw = datetime.timezone(datetime.timedelta(hours=8))
     today_str = datetime.datetime.now(tz_tw).strftime("%Y/%m/%d")
 
+    # 日期與標籤
     draw.rectangle([210, 190, 390, 230], fill=(10, 18, 38, 255))
     draw.text((215, 195), today_str, font=sub_font, fill="#94A3B8")
 
-    tag_text = f"STEP {card_num:02d} / {total_cards:02d}"
     draw.rectangle([780, 85, 980, 130], fill=(10, 18, 38, 255))
-    draw.text((785, 90), tag_text, font=sub_font, fill="#00E5FF")
+    draw.text((785, 90), "DAILY REPORT", font=sub_font, fill="#00E5FF")
 
-    draw.rectangle([220, 275, 860, 345], fill=(15, 25, 50, 255))
+    # 標題
+    draw.rectangle([150, 275, 930, 345], fill=(15, 25, 50, 255))
     display_title = f"【 {title} 】"
-    
     title_bbox = draw.textbbox((0, 0), display_title, font=title_font)
     title_w = title_bbox[2] - title_bbox[0]
     title_x = (width - title_w) // 2
@@ -216,66 +186,44 @@ def draw_3d_card(title, body_text, card_num, total_cards=4, output_img="card.png
     draw.text((title_x + 2, 287), display_title, font=title_font, fill="#8B6508")
     draw.text((title_x, 285), display_title, font=title_font, fill="#FFD700")
 
-    box_x1, box_x2 = 100, 980
+    # 內文自動換行
+    box_x1, box_x2 = 110, 970
     max_width = box_x2 - box_x1
 
     lines = []
-    current_line = ""
-    for char in body_text:
-        test_line = current_line + char
-        bbox = draw.textbbox((0, 0), test_line, font=body_font)
-        if bbox[2] - bbox[0] <= max_width:
-            current_line = test_line
-        else:
+    for paragraph in body_text.splitlines():
+        if not paragraph.strip():
+            continue
+        current_line = ""
+        for char in paragraph:
+            test_line = current_line + char
+            bbox = draw.textbbox((0, 0), test_line, font=body_font)
+            if bbox[2] - bbox[0] <= max_width:
+                current_line = test_line
+            else:
+                lines.append(current_line)
+                current_line = char
+        if current_line:
             lines.append(current_line)
-            current_line = char
-    if current_line:
-        lines.append(current_line)
+        lines.append("") # 空行分隔段落
 
     y_offset = 430
-    line_height = 66
+    line_height = 62
 
-    for line in lines[:15]:
+    for line in lines[:18]:
+        if line == "":
+            y_offset += 20
+            continue
         draw.text((box_x1 + 2, y_offset + 2), line, font=body_font, fill="#000000")
         draw.text((box_x1, y_offset), line, font=body_font, fill="#F8FAFC")
         y_offset += line_height
 
-    # 1. 儲存卡片圖片
     base.convert("RGB").save(output_img)
-    
-    # 2. 如果是第一張卡片，同步存一份 cover.png 確保 LINE 有預覽圖
-    if output_img == "card_1.png" or card_num == 1:
-        base.convert("RGB").save("cover.png")
+    print(f"圖卡成功產出：{output_img}")
 
 
-def render_multi_card_video(cards_data, audio_file="narration.mp3", output_mp4="daily_report.mp4"):
-    """渲染多頁動態切換 3D 圖卡的 2 分鐘 MP4 影片"""
-    audio = AudioFileClip(audio_file)
-    total_duration = audio.duration
-    num_cards = len(cards_data)
-    per_card_duration = total_duration / num_cards
-
-    clips = []
-    for idx, card in enumerate(cards_data):
-        img_filename = f"card_{idx+1}.png"
-        draw_3d_card(card["title"], card["body"], card_num=idx+1, total_cards=num_cards, output_img=img_filename)
-        
-        dur = per_card_duration if idx < num_cards - 1 else (total_duration - per_card_duration * (num_cards - 1))
-        clip = ImageClip(img_filename).with_duration(dur)
-        clips.append(clip)
-
-    final_clip = concatenate_videoclips(clips, method="compose").with_audio(audio)
-    try:
-        final_clip.write_videofile(output_mp4, fps=2, codec="libx264", audio_codec="aac")
-    finally:
-        audio.close()
-        for c in clips:
-            c.close()
-        final_clip.close()
-
-
-def send_line_broadcast():
-    """發送 LINE 影音推播通知"""
+def send_line_broadcast(line_text):
+    """發送 LINE 圖片與文字廣播訊息"""
     line_token = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
     if not line_token:
         print("未設定 LINE_CHANNEL_ACCESS_TOKEN，略過推播。")
@@ -287,32 +235,26 @@ def send_line_broadcast():
         "Authorization": f"Bearer {line_token}",
     }
 
-    tz_tw = datetime.timezone(datetime.timedelta(hours=8))
-    today_short = datetime.datetime.now(tz_tw).strftime("%m/%d").lstrip("0").replace("/0", "/")
-    
-    # 時間戳記避開 CDN 與 LINE 的快取問題
     timestamp = int(time.time())
-
-    video_url = f"https://raw.githubusercontent.com/m9606286/taiwan-stock-daily-pdf/main/daily_report.mp4?v={timestamp}"
-    preview_url = f"https://raw.githubusercontent.com/m9606286/taiwan-stock-daily-pdf/main/cover.png?v={timestamp}"
+    image_url = f"https://raw.githubusercontent.com/m9606286/taiwan-stock-daily-pdf/main/cover.png?v={timestamp}"
 
     payload = {
         "messages": [
             {
-                "type": "video",
-                "originalContentUrl": video_url,
-                "previewImageUrl": preview_url,
+                "type": "image",
+                "originalContentUrl": image_url,
+                "previewImageUrl": image_url
             },
             {
                 "type": "text",
-                "text": f"🎬 {today_short} 台股盤前 2 分鐘【AI 智算深度晨報】已生成！含 3D 視覺解析與即時新聞動態。",
-            },
+                "text": line_text
+            }
         ]
     }
 
     response = requests.post(url, headers=headers, json=payload)
     if response.status_code == 200:
-        print("LINE 影音推播成功！")
+        print("LINE 圖文推播成功發送！")
     else:
         print(f"LINE 發送失敗：{response.status_code}, {response.text}")
 
@@ -321,14 +263,11 @@ if __name__ == "__main__":
     print("1. 抓取最新財經頭條...")
     news = fetch_latest_stock_news()
 
-    print("2. 呼叫 Gemini 生成 2 分鐘腳本與 4 張圖卡結構...")
-    cards, audio_script = generate_video_script_and_cards(news)
+    print("2. 呼叫 Gemini 生成智算晨報重點與文字...")
+    card_title, card_body, line_text = generate_report_content(news)
 
-    print("3. 合成 2 分鐘高音質語音 (Edge-TTS)...")
-    asyncio.run(text_to_speech(audio_script, "narration.mp3"))
+    print("3. 繪製 3D 視覺晨報圖卡 (cover.png)...")
+    draw_3d_card(card_title, card_body, "cover.png")
 
-    print("4. 繪製 3D 科技感立體圖卡並渲染影片...")
-    render_multi_card_video(cards, "narration.mp3", "daily_report.mp4")
-
-    print("5. 發送 LINE 影音推播...")
-    send_line_broadcast()
+    print("4. 發送 LINE 圖文推播...")
+    send_line_broadcast(line_text)
