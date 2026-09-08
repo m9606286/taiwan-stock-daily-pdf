@@ -1,61 +1,43 @@
-name: Daily Taiwan Stock PDF Broadcast
+name: Daily Taiwan Stock Report
 
 on:
   schedule:
-    # UTC 23:00 等於台灣時間 (UTC+8) 隔天早上 07:00
-    - cron: '0 23 * * 0-4'
-  workflow_dispatch: # 允許手動測試
+    # 台灣時間 06:40 執行 (UTC 時間為 22:40)
+    # 提前設定可抵銷 GitHub 排程熱門時段的排隊延遲
+    - cron: '40 22 * * *'
+  workflow_dispatch: # 允許在 GitHub 頁面手動點擊執行
 
 jobs:
-  run-automation:
+  build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write # 顯式賦予寫入權限
     steps:
-      - name: 載入專案程式碼
-        uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v3
 
-      - name: 設定 Python 環境
-        uses: actions/setup-python@v5
+      - name: Set up Python
+        uses: actions/setup-python@v4
         with:
           python-version: '3.10'
 
-      # 1. 必須在執行腳本前先安裝 Linux 中文字型
-      - name: 安裝系統中文字型
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y fonts-noto-cjk
+      # 強制設定系統時區為台北時間，確保時間計算精準
+      - name: Set Timezone
+        run: sudo timedatectl set-timezone Asia/Taipei
 
-      # 2. 安裝 Python 套件
-      - name: 安裝必要套件
+      - name: Install dependencies
         run: |
-          pip install google-genai requests weasyprint feedparser
+          python -m pip install --upgrade pip
+          pip install requests feedparser google-genai weasyprint
 
-      # 3. 執行 Python 腳本生成 PDF 並發送 LINE
-      - name: 執行 Python 自動化腳本
+      - name: Run script
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
         run: python main.py
 
-      # 4. 提交 PDF 檔案回到 GitHub Repository
-      - name: 將 PDF 報告提交回 Repository
+      - name: Commit and push updated PDF
         run: |
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
-          if [ -f taiwan_stock_daily.pdf ]; then
-            git add taiwan_stock_daily.pdf
-            git commit -m "Auto update daily stock PDF" || exit 0
-            git push
-          else
-            echo "PDF 檔案不存在，跳過 Git commit"
-          fi
-
-      # 5. 上傳 Artifact 備份
-      - name: 上傳 PDF 報告至 Artifacts (備份下載)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: taiwan-stock-daily-pdf
-          path: taiwan_stock_daily.pdf
-          if-no-files-found: ignore
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add taiwan_stock_daily.pdf
+          git commit -m "Auto update daily PDF report" || exit 0
+          git push
