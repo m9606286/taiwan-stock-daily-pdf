@@ -9,13 +9,13 @@ from google.genai import errors
 from weasyprint import HTML
 
 def fetch_latest_stock_news():
-    """抓取今日清晨新聞"""
+    """抓取過去 12 小時內最新財經頭條（強制台灣時區）"""
     rss_url = "https://news.google.com/rss/search?q=site:money.udn.com+(台股+OR+美股+OR+夜盤+OR+ADR+OR+半導體+OR+AI)&hl=zh-TW&gl=TW&ceid=TW:zh-Hant"
     feed = feedparser.parse(rss_url)
     
+    # 強制設定為台灣時間 (UTC+8)
     tz_tw = datetime.timezone(datetime.timedelta(hours=8))
     now_tw = datetime.datetime.now(tz_tw)
-    today_date = now_tw.date()
     
     clean_titles = []
     
@@ -23,27 +23,29 @@ def fetch_latest_stock_news():
         if not hasattr(entry, 'published_parsed') or not entry.published_parsed:
             continue
             
+        # 轉換新聞發布時間至台灣時間
         pub_utc_epoch = time.mktime(entry.published_parsed)
         pub_tw_dt = datetime.datetime.fromtimestamp(pub_utc_epoch, tz=datetime.timezone.utc).astimezone(tz_tw)
         
-        if pub_tw_dt.date() == today_date and pub_tw_dt.hour < 7:
-            if entry.title not in clean_titles:
-                clean_titles.append(entry.title)
+        # 計算發布時間差距
+        time_diff_seconds = (now_tw - pub_tw_dt).total_seconds()
+        
+        # 抓取過去 12 小時內發布的最新新聞
+        if 0 <= time_diff_seconds <= 12 * 3600:
+            title = entry.title.split(" - ")[0].strip()
+            if title not in clean_titles:
+                clean_titles.append(title)
             
-        if len(clean_titles) >= 12:
+        if len(clean_titles) >= 10:
             break
 
-    if len(clean_titles) < 5:
+    # 若清晨新聞量不足（如週一或假日），保底抓取最新 8 則
+    if len(clean_titles) < 3:
         for entry in feed.entries:
-            if not hasattr(entry, 'published_parsed') or not entry.published_parsed:
-                continue
-            pub_utc_epoch = time.mktime(entry.published_parsed)
-            pub_tw_dt = datetime.datetime.fromtimestamp(pub_utc_epoch, tz=datetime.timezone.utc).astimezone(tz_tw)
-            
-            if (now_tw - pub_tw_dt).total_seconds() <= 12 * 3600:
-                if entry.title not in clean_titles:
-                    clean_titles.append(entry.title)
-            if len(clean_titles) >= 12:
+            title = entry.title.split(" - ")[0].strip()
+            if title not in clean_titles:
+                clean_titles.append(title)
+            if len(clean_titles) >= 8:
                 break
 
     return clean_titles
@@ -52,7 +54,8 @@ def generate_report_content(news_titles):
     """Gemini 深度剖析 Prompt"""
     client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
     
-    today_str = datetime.date.today().strftime("%Y 年 %m 月 %d 日")
+    tz_tw = datetime.timezone(datetime.timedelta(hours=8))
+    today_str = datetime.datetime.now(tz_tw).strftime("%Y 年 %m 月 %d 日")
     news_text = "\n".join([f"- {title}" for title in news_titles])
     
     prompt = f"""
@@ -135,7 +138,8 @@ def format_analysis_html(raw_text):
 
 def create_pdf(news_titles, ai_analysis):
     """生成高級感手機專用 PDF"""
-    today_str = datetime.date.today().strftime("%Y/%m/%d")
+    tz_tw = datetime.timezone(datetime.timedelta(hours=8))
+    today_str = datetime.datetime.now(tz_tw).strftime("%Y/%m/%d")
     cleaned_news = [clean_markdown_text(title) for title in news_titles]
     
     news_li_html = "".join([f'<div class="news-item"><span class="dot"></span>{title}</div>' for title in cleaned_news])
@@ -163,7 +167,6 @@ def create_pdf(news_titles, ai_analysis):
                 background-color: #0b1329;
             }}
 
-            /* 頂部 Header：極簡科技感 */
             .hero-card {{
                 background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
                 border-radius: 12px;
@@ -202,7 +205,6 @@ def create_pdf(news_titles, ai_analysis):
                 border: 1px solid rgba(56, 189, 248, 0.3);
             }}
 
-            /* 數據簡報矩陣 */
             .metrics-grid {{
                 display: table;
                 width: 100%;
@@ -229,7 +231,6 @@ def create_pdf(news_titles, ai_analysis):
             .metric-label {{ font-size: 7.5pt; color: #94a3b8; font-weight: 600; }}
             .metric-value {{ font-size: 10pt; font-weight: 800; margin-top: 2px; color: #f8fafc; }}
 
-            /* 內容卡片面板 */
             .section-panel {{
                 background: rgba(15, 23, 42, 0.6);
                 border-radius: 12px;
@@ -247,7 +248,6 @@ def create_pdf(news_titles, ai_analysis):
                 border-bottom: 1px solid rgba(255, 255, 255, 0.1);
             }}
 
-            /* 新聞列表 */
             .news-item {{
                 background: rgba(30, 41, 59, 0.4);
                 padding: 7px 10px;
@@ -267,7 +267,6 @@ def create_pdf(news_titles, ai_analysis):
                 vertical-align: middle;
             }}
 
-            /* 分析內文 */
             .block-title {{
                 font-size: 10pt;
                 font-weight: 800;
@@ -282,7 +281,6 @@ def create_pdf(news_titles, ai_analysis):
                 margin: 0 0 6px 0;
             }}
 
-            /* 強調提示框 */
             .callout-box {{
                 background: rgba(234, 179, 8, 0.1);
                 border: 1px solid rgba(234, 179, 8, 0.3);
@@ -371,8 +369,14 @@ def send_line_broadcast(text_content):
         "Authorization": f"Bearer {line_token}"
     }
     
-    today_short = datetime.datetime.now().strftime("%m/%d").lstrip('0').replace('/0', '/')
-    pdf_url = "https://cdn.jsdelivr.net/gh/m9606286/taiwan-stock-daily-pdf@main/taiwan_stock_daily.pdf"
+    # 強制台灣時區日期
+    tz_tw = datetime.timezone(datetime.timedelta(hours=8))
+    now_tw = datetime.datetime.now(tz_tw)
+    today_short = now_tw.strftime("%m/%d").lstrip('0').replace('/0', '/')
+    
+    # 加上動態時間戳記防止 CDN 快取舊檔
+    timestamp = int(time.time())
+    pdf_url = f"https://cdn.jsdelivr.net/gh/m9606286/taiwan-stock-daily-pdf@main/taiwan_stock_daily.pdf?v={timestamp}"
     
     payload = {
         "messages": [
@@ -392,7 +396,7 @@ def send_line_broadcast(text_content):
 if __name__ == "__main__":
     print("開始執行每日台股晨報自動化流程...")
     news_list = fetch_latest_stock_news()
-    print(f"已抓取經濟日報今日清晨即時新聞（共 {len(news_list)} 則）。")
+    print(f"已抓取經濟日報最新即時新聞（共 {len(news_list)} 則）。")
     analysis = generate_report_content(news_list)
     print("Gemini 深度剖析完畢。")
     pdf_file = create_pdf(news_list, analysis)
