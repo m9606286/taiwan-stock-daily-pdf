@@ -85,7 +85,7 @@ AI伺服器供應鏈獲利動能明確，盤中留意大盤成交量變化。
 祝您今日投資順利！
 """
 
-    models_to_try = ["gemini-2.5-flash", "gemini-1.5-flash", "gemini-2.0-flash"]
+    models_to_try = ["gemini-3.6-flash", "gemini-2.5-flash"]
     
     report_raw = None
     last_error = None
