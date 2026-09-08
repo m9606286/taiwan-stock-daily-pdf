@@ -1,8 +1,9 @@
-name: Daily Taiwan Stock Report
+name: Daily Taiwan Stock Video Report
 
 on:
   schedule:
-    - cron: '40 22 * * *'
+    # 台灣時間 07:00 執行 (UTC 23:00)
+    - cron: '0 23 * * 0-4'
   workflow_dispatch:
 
 jobs:
@@ -20,16 +21,16 @@ jobs:
       - name: Set Timezone
         run: sudo timedatectl set-timezone Asia/Taipei
 
-      # 精簡版字型安裝：只下載輕量級微米黑字型，拿掉耗時的 fc-cache 步驟
-      - name: Fast Install Chinese Fonts
+      # 安裝影片渲染套件 ffmpeg 與中文字型
+      - name: Install System Dependencies (ffmpeg & fonts)
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends fonts-wqy-microhei libpango-1.0-0 libharfbuzz0b libpangoft2-1.0-0
+          sudo apt-get install -y ffmpeg fonts-wqy-microhei
 
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests feedparser google-genai weasyprint
+          pip install -r requirements.txt
 
       - name: Run script
         env:
@@ -37,10 +38,10 @@ jobs:
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
         run: python main.py
 
-      - name: Commit and push updated PDF
+      - name: Commit and push video & image
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add taiwan_stock_daily.pdf
-          git commit -m "Auto update daily PDF report" || exit 0
+          git add daily_report.mp4 cover.png
+          git commit -m "Auto update daily video report" || exit 0
           git push
