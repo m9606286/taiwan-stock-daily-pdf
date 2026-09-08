@@ -4,7 +4,7 @@ on:
   schedule:
     # 台灣時間平日 AM 07:00 (UTC 23:00)
     - cron: '0 23 * * 0-4'
-  workflow_dispatch:
+  workflow_dispatch: # 允許手動點擊執行
 
 jobs:
   build:
@@ -21,6 +21,7 @@ jobs:
       - name: Set Timezone
         run: sudo timedatectl set-timezone Asia/Taipei
 
+      # 安裝影片渲染所需的系統工具（ffmpeg）與中文字型
       - name: Install System Dependencies (ffmpeg & fonts)
         run: |
           sudo apt-get update
@@ -41,6 +42,11 @@ jobs:
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add -f daily_report.mp4 cover.png narration.mp3
+          
+          # 動態檢查檔案是否存在才加入追蹤，徹底避免 pathspec 找不到檔案的報錯
+          [ -f daily_report.mp4 ] && git add -f daily_report.mp4
+          [ -f cover.png ] && git add -f cover.png
+          [ -f narration.mp3 ] && git add -f narration.mp3
+          
           git commit -m "Auto update daily video report" || echo "No changes to commit"
           git push
