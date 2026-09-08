@@ -1,46 +1,7 @@
-name: Daily Taiwan Stock Video Report
-
-on:
-  schedule:
-    # 台灣時間平日 AM 07:00 (UTC 23:00)
-    - cron: '0 23 * * 0-4'
-  workflow_dispatch:
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.10'
-
-      - name: Set Timezone
-        run: sudo timedatectl set-timezone Asia/Taipei
-
-      - name: Install System Dependencies (ffmpeg & fonts)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg fonts-wqy-microhei
-
-      - name: Install Python dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
-      - name: Run script
-        env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
-        run: python main.py
-
-      - name: Commit and push video & image
+- name: Commit and push video & image
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add daily_report.mp4 cover.png
-          git commit -m "Auto update daily video report" || exit 0
+          git add -f daily_report.mp4 cover.png narration.mp3
+          git commit -m "Auto update daily video report" || echo "No changes to commit"
           git push
