@@ -1,4 +1,7 @@
 requests
-google-genai
-weasyprint
 feedparser
+google-genai
+edge-tts
+moviepy
+gTTS
+pillow
