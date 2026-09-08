@@ -93,27 +93,61 @@ def generate_video_script(news_titles):
 """
 
     models_to_try = [
-        "gemini-2.5-flash",
-        "gemini-2.0-flash",
+        "gemini-3.6-flash",
+        "gemini-3.8-flash",
+        "gemini-3.5-flash",
     ]
-
-    response = None
+    tried = set()
+    script_text = None
     last_error = None
 
-    for model_name in models_to_try:
+    def _suggested_model(error):
+        match = re.search(r"use models/(gemini-[a-z0-9.\-]+)", str(error), re.IGNORECASE)
+        return match.group(1) if match else None
+
+    def _extract_text(result):
+        if result is None:
+            return None
+        text = getattr(result, "text", None) or getattr(result, "output_text", None)
+        if text:
+            return text
+        return None
+
+    idx = 0
+    while idx < len(models_to_try):
+        model_name = models_to_try[idx]
+        idx += 1
+        if model_name in tried:
+            continue
+        tried.add(model_name)
+
         for attempt in range(1, 4):
             try:
                 print(f"嘗試使用模型 [{model_name}] 生成腳本 (第 {attempt} 次)...")
-                response = client.models.generate_content(
-                    model=model_name,
-                    contents=prompt,
-                )
-                if response and getattr(response, "text", None):
+                try:
+                    result = client.models.generate_content(
+                        model=model_name,
+                        contents=prompt,
+                    )
+                except Exception as generate_error:
+                    # 部分帳號/SDK 版本對舊 generateContent 回 404，改走 Interactions API
+                    print(f"generate_content 失敗，改試 interactions.create: {generate_error}")
+                    last_error = generate_error
+                    result = client.interactions.create(
+                        model=model_name,
+                        input=prompt,
+                    )
+                script_text = _extract_text(result)
+                if script_text:
                     print(f"成功使用 [{model_name}] 生成腳本！")
                     break
             except Exception as e:
                 last_error = e
                 print(f"模型 [{model_name}] 第 {attempt} 次呼叫失敗: {e}")
+                suggested = _suggested_model(e)
+                if suggested and suggested not in tried and suggested not in models_to_try:
+                    print(f"API 建議改用模型 [{suggested}]，加入備援清單。")
+                    models_to_try.append(suggested)
                 if attempt < 3 and _is_retryable_gemini_error(e):
                     wait_seconds = attempt * 3
                     print(f"偵測到可重試錯誤（含 503），等待 {wait_seconds} 秒後重試...")
@@ -121,13 +155,13 @@ def generate_video_script(news_titles):
                     continue
                 break
 
-        if response and getattr(response, "text", None):
+        if script_text:
             break
 
-    if not response or not getattr(response, "text", None):
+    if not script_text:
         raise RuntimeError(f"所有 Gemini 模型呼叫失敗，最後錯誤: {last_error}")
 
-    script = re.sub(r"[\*\#\-\_]", "", response.text).strip()
+    script = re.sub(r"[\*\#\-\_]", "", script_text).strip()
     return script
 
 
@@ -147,12 +181,22 @@ def create_cover_image(script_text, output_img="cover.png"):
     tz_tw = datetime.timezone(datetime.timedelta(hours=8))
     today_str = datetime.datetime.now(tz_tw).strftime("%Y/%m/%d")
 
-    font_path = "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc"
-    try:
-        title_font = ImageFont.truetype(font_path, 80)
-        sub_font = ImageFont.truetype(font_path, 45)
-        body_font = ImageFont.truetype(font_path, 38)
-    except OSError:
+    font_candidates = [
+        "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+        r"C:\Windows\Fonts\msjh.ttc",
+        r"C:\Windows\Fonts\msyh.ttc",
+        r"C:\Windows\Fonts\mingliu.ttc",
+    ]
+    title_font = sub_font = body_font = None
+    for font_path in font_candidates:
+        try:
+            title_font = ImageFont.truetype(font_path, 80)
+            sub_font = ImageFont.truetype(font_path, 45)
+            body_font = ImageFont.truetype(font_path, 38)
+            break
+        except OSError:
+            continue
+    if title_font is None:
         title_font = sub_font = body_font = ImageFont.load_default()
 
     draw.text((80, 150), "盤前極速總研", font=title_font, fill="#38bdf8")
@@ -198,6 +242,9 @@ def render_video(audio_file="narration.mp3", image_file="cover.png", output_mp4=
 def send_line_broadcast():
     """發送 LINE 影音推播通知"""
     line_token = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
+    if not line_token:
+        print("未設定 LINE_CHANNEL_ACCESS_TOKEN，略過推播。")
+        return
     url = "https://api.line.me/v2/bot/message/broadcast"
 
     headers = {
