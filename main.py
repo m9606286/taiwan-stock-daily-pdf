@@ -8,7 +8,7 @@ import feedparser
 import edge_tts
 from google import genai
 from PIL import Image, ImageDraw, ImageFont
-from moviepy.editor import AudioFileClip, ImageClip
+from moviepy import AudioFileClip, ImageClip
 
 def fetch_latest_stock_news():
     """抓取過去 12 小時內最新財經頭條"""
@@ -68,13 +68,12 @@ def generate_video_script(news_titles):
         config=config
     )
     
-    # 徹底清除 Markdown 符號
     script = re.sub(r'[\*\#\-\_]', '', response.text).strip()
     return script
 
 async def text_to_speech(text, output_file="narration.mp3"):
-    """使用 Edge TTS 生成高音質繁體中文語音（雲希）"""
-    voice = "zh-TW-YunXiNeural" # 自然流暢的台灣男聲
+    """使用 Edge TTS 生成高音質繁體中文語音"""
+    voice = "zh-TW-YunXiNeural"
     communicate = edge_tts.Communicate(text, voice)
     await communicate.save(output_file)
 
@@ -87,7 +86,6 @@ def create_cover_image(script_text, output_img="cover.png"):
     tz_tw = datetime.timezone(datetime.timedelta(hours=8))
     today_str = datetime.datetime.now(tz_tw).strftime("%Y/%m/%d")
     
-    # 嘗試載入系統中文字型
     font_path = "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc"
     try:
         title_font = ImageFont.truetype(font_path, 80)
@@ -96,12 +94,10 @@ def create_cover_image(script_text, output_img="cover.png"):
     except:
         title_font = sub_font = body_font = ImageFont.load_default()
 
-    # 繪製標題與日期
     draw.text((80, 150), "盤前極速總研", font=title_font, fill="#38bdf8")
     draw.text((80, 260), f"📅 {today_str} 每日 60 秒晨報", font=sub_font, fill="#94a3b8")
     draw.line([(80, 330), (1000, 330)], fill="#334155", width=4)
 
-    # 繪製逐字稿文字區域（自動折行）
     margin = 80
     max_width = width - (2 * margin)
     lines = []
@@ -118,17 +114,17 @@ def create_cover_image(script_text, output_img="cover.png"):
     lines.append(current_line)
 
     y_offset = 380
-    for line in lines[:25]: # 限制最大顯示行數
+    for line in lines[:25]:
         draw.text((margin, y_offset), line, font=body_font, fill="#e2e8f0")
         y_offset += 55
 
     img.save(output_img)
 
 def render_video(audio_file="narration.mp3", image_file="cover.png", output_mp4="daily_report.mp4"):
-    """結合圖卡與語音生成 MP4 影片"""
+    """結合圖卡與語音生成 MP4 影片（支援 MoviePy 2.0+ 語法）"""
     audio = AudioFileClip(audio_file)
-    clip = ImageClip(image_file).set_duration(audio.duration)
-    video = clip.set_audio(audio)
+    clip = ImageClip(image_file).with_duration(audio.duration)
+    video = clip.with_audio(audio)
     video.write_videofile(output_mp4, fps=1, codec="libx264", audio_codec="aac")
 
 def send_line_broadcast():
@@ -145,7 +141,6 @@ def send_line_broadcast():
     today_short = datetime.datetime.now(tz_tw).strftime("%m/%d").lstrip('0').replace('/0', '/')
     timestamp = int(time.time())
     
-    # jsDelivr CDN 直連 MP4 網址
     video_url = f"https://cdn.jsdelivr.net/gh/m9606286/taiwan-stock-daily-pdf@main/daily_report.mp4?v={timestamp}"
     preview_url = f"https://cdn.jsdelivr.net/gh/m9606286/taiwan-stock-daily-pdf@main/cover.png?v={timestamp}"
     
