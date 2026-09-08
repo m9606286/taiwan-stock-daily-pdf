@@ -23,7 +23,7 @@ def create_pdf(news_titles, ai_analysis):
             
             /* 強制指定 Ubuntu Linux 內建的 Noto Sans CJK SC/TC 中文字型 */
             body {{
-                font-family: "Noto Sans CJK TC", "Noto Sans CJK SC", "Noto Sans MC", "AR PL UKai TW", "AR PL UMing TW", sans-serif;
+                font-family: "WenQuanYi Micro Hei", "Noto Sans CJK TC", sans-serif;
                 margin: 0;
                 padding: 0;
                 color: #e2e8f0;
