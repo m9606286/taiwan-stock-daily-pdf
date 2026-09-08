@@ -46,12 +46,14 @@ def fetch_latest_stock_news():
 
 
 def _is_retryable_gemini_error(error):
-    """判斷是否為可重試錯誤（503 / 過載 / 暫時不可用）。"""
+    """判斷是否為可重試錯誤（503 / 過載 / 暫時不可用）。404 NOT_FOUND 不重試。"""
     status = getattr(error, "status_code", None) or getattr(error, "code", None)
+    message = str(error).lower()
+    if status in (404,) or "404" in message or "not_found" in message or "not found" in message:
+        return False
     if status in (429, 500, 503, 504):
         return True
 
-    message = str(error).lower()
     retry_markers = (
         "503",
         "429",
@@ -69,7 +71,12 @@ def _is_retryable_gemini_error(error):
 
 def generate_video_script(news_titles):
     """由 Gemini 生成 60 秒短影音旁白逐字稿（含自動重試與模型備援機制）"""
-    client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
+    api_key = (os.environ.get("GEMINI_API_KEY") or "").strip()
+    if not api_key:
+        raise RuntimeError("缺少 GEMINI_API_KEY，無法呼叫 Gemini Developer API。")
+
+    # 明確使用 Gemini Developer API（api_key），避免誤走 Vertex AI 導致模型 404
+    client = genai.Client(api_key=api_key, vertexai=False)
     tz_tw = datetime.timezone(datetime.timedelta(hours=8))
     today_str = datetime.datetime.now(tz_tw).strftime("%Y 年 %m 月 %d 日")
     news_text = "\n".join([f"- {title}" for title in news_titles])
@@ -85,10 +92,9 @@ def generate_video_script(news_titles):
 3. 嚴格禁止使用任何 Markdown 符號（如 **、#、-），僅輸出純文字逐字稿。
 """
 
-    config = {"automatic_function_calling": {"disable": True}}
     models_to_try = [
         "gemini-2.5-flash",
-        "gemini-1.5-flash",
+        "gemini-2.0-flash",
     ]
 
     response = None
@@ -101,7 +107,6 @@ def generate_video_script(news_titles):
                 response = client.models.generate_content(
                     model=model_name,
                     contents=prompt,
-                    config=config,
                 )
                 if response and getattr(response, "text", None):
                     print(f"成功使用 [{model_name}] 生成腳本！")
