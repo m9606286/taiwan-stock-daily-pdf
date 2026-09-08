@@ -105,7 +105,7 @@ AI智算盤勢解析
 """
 
     # 使用最新的 Gemini 3.6 Flash 模型
-    models_to_try = ["gemini-3.6-flash", "gemini-2.5-flash"]
+    models_to_try = ["gemini-3.6-flash"]
     script_raw = None
     last_error = None
 
