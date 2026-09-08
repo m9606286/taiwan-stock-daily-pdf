@@ -75,7 +75,6 @@ def generate_video_script(news_titles):
     if not api_key:
         raise RuntimeError("缺少 GEMINI_API_KEY，無法呼叫 Gemini Developer API。")
 
-    # 明確使用 Gemini Developer API（api_key），避免誤走 Vertex AI 導致模型 404
     client = genai.Client(api_key=api_key, vertexai=False)
     tz_tw = datetime.timezone(datetime.timedelta(hours=8))
     today_str = datetime.datetime.now(tz_tw).strftime("%Y 年 %m 月 %d 日")
@@ -89,13 +88,12 @@ def generate_video_script(news_titles):
 要求：
 1. 開頭快速問好並點出今日市場核心主軸。
 2. 語氣自然流暢、抑揚頓挫，適合語音合成朗讀。
-3. 嚴格禁止使用任何 Markdown 符號（如 **、#、-），僅輸出純文字逐字稿。
+3. 嚴格禁止使用任何 Markdown 符號（如 **、#、-、*）、表情符號或英文特殊字元，僅輸出純繁體中文逐字稿。
 """
 
     models_to_try = [
-        "gemini-3.6-flash",
-        "gemini-3.8-flash",
-        "gemini-3.5-flash",
+        "gemini-2.5-flash",
+        "gemini-2.0-flash",
     ]
     tried = set()
     script_text = None
@@ -124,19 +122,10 @@ def generate_video_script(news_titles):
         for attempt in range(1, 4):
             try:
                 print(f"嘗試使用模型 [{model_name}] 生成腳本 (第 {attempt} 次)...")
-                try:
-                    result = client.models.generate_content(
-                        model=model_name,
-                        contents=prompt,
-                    )
-                except Exception as generate_error:
-                    # 部分帳號/SDK 版本對舊 generateContent 回 404，改走 Interactions API
-                    print(f"generate_content 失敗，改試 interactions.create: {generate_error}")
-                    last_error = generate_error
-                    result = client.interactions.create(
-                        model=model_name,
-                        input=prompt,
-                    )
+                result = client.models.generate_content(
+                    model=model_name,
+                    contents=prompt,
+                )
                 script_text = _extract_text(result)
                 if script_text:
                     print(f"成功使用 [{model_name}] 生成腳本！")
@@ -161,14 +150,25 @@ def generate_video_script(news_titles):
     if not script_text:
         raise RuntimeError(f"所有 Gemini 模型呼叫失敗，最後錯誤: {last_error}")
 
-    script = re.sub(r"[\*\#\-\_]", "", script_text).strip()
-    return script
+    # 深度清理字串，確保 Edge-TTS 接收到合法的朗讀文本
+    clean_script = re.sub(r"[^\w\s\u4e00-\u9fa5，。！？；：]", "", script_text).strip()
+    if not clean_script or len(clean_script) < 10:
+        clean_script = f"大家早安，今天是{today_str}。今日財經焦點：台股與全球市場動態持續受到投資人關注，請持續留意最新市場消息。"
+
+    return clean_script
 
 
 async def text_to_speech(text, output_file="narration.mp3"):
     """使用 Edge TTS 生成高音質繁體中文語音"""
-    voice = "zh-TW-YunXiNeural"
-    communicate = edge_tts.Communicate(text, voice)
+    # 使用最穩定的繁體中文語音庫 (曉臻)
+    voice = "zh-TW-HsiaoChenNeural"
+    
+    # 清理非必要空行
+    text_to_read = text.strip()
+    if not text_to_read:
+        text_to_read = "今日盤前財經摘要生成完畢。"
+
+    communicate = edge_tts.Communicate(text_to_read, voice)
     await communicate.save(output_file)
 
 
