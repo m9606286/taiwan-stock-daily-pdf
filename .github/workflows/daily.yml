@@ -6,17 +6,21 @@ on:
     - cron: '0 23 * * 0-4'
   workflow_dispatch: # 允許手動點擊執行
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
+          cache: 'pip'
 
       - name: Set Timezone
         run: sudo timedatectl set-timezone Asia/Taipei
@@ -42,11 +46,12 @@ jobs:
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          
+
           # 動態檢查檔案是否存在才加入追蹤，徹底避免 pathspec 找不到檔案的報錯
-          [ -f daily_report.mp4 ] && git add -f daily_report.mp4
-          [ -f cover.png ] && git add -f cover.png
-          [ -f narration.mp3 ] && git add -f narration.mp3
-          
+          # || true 避免 bash set -e 在檔案不存在時因 [ -f ] 回傳 1 中斷流程
+          [ -f daily_report.mp4 ] && git add -f daily_report.mp4 || true
+          [ -f cover.png ] && git add -f cover.png || true
+          [ -f narration.mp3 ] && git add -f narration.mp3 || true
+
           git commit -m "Auto update daily video report" || echo "No changes to commit"
           git push
