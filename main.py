@@ -8,91 +8,97 @@ from google import genai
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
 
-def fetch_latest_stock_news():
-    """抓取過去 12 小時內最新財經頭條"""
-    rss_url = "https://news.google.com/rss/search?q=site:money.udn.com+(台股+OR+美股+OR+夜盤+OR+ADR+OR+半導體+OR+AI)&hl=zh-TW&gl=TW&ceid=TW:zh-Hant"
-    feed = feedparser.parse(rss_url)
+def fetch_all_market_news():
+    """廣泛抓取最新台股、美股、產業相關新聞"""
+    rss_urls = [
+        "https://news.google.com/rss/search?q=site:money.udn.com+(台股+OR+半導體+OR+AI+OR+電子+OR+金融)&hl=zh-TW&gl=TW&ceid=TW:zh-Hant",
+        "https://news.google.com/rss/search?q=site:ctee.com.tw+(台股+OR+產業+OR+營收+OR+概念股)&hl=zh-TW&gl=TW&ceid=TW:zh-Hant",
+        "https://news.google.com/rss/search?q=site:cnyes.com+(台股+OR+美股+OR+夜盤+OR+ADR)&hl=zh-TW&gl=TW&ceid=TW:zh-Hant"
+    ]
 
     tz_tw = datetime.timezone(datetime.timedelta(hours=8))
     now_tw = datetime.datetime.now(tz_tw)
     clean_titles = []
 
-    for entry in feed.entries:
-        if not hasattr(entry, "published_parsed") or not entry.published_parsed:
-            continue
-        pub_utc_epoch = time.mktime(entry.published_parsed)
-        pub_tw_dt = datetime.datetime.fromtimestamp(pub_utc_epoch, tz=datetime.timezone.utc).astimezone(tz_tw)
-        time_diff_seconds = (now_tw - pub_tw_dt).total_seconds()
+    for url in rss_urls:
+        try:
+            feed = feedparser.parse(url)
+            for entry in feed.entries:
+                title = entry.title.split(" - ")[0].strip()
+                # 簡單過濾重複與無關新聞
+                if title and title not in clean_titles:
+                    clean_titles.append(title)
+                if len(clean_titles) >= 15:
+                    break
+        except Exception as e:
+            print(f"抓取 RSS 失敗 ({url}): {e}")
 
-        if 0 <= time_diff_seconds <= 12 * 3600:
-            title = entry.title.split(" - ")[0].strip()
-            if title not in clean_titles:
-                clean_titles.append(title)
-        if len(clean_titles) >= 5:
-            break
-
-    if len(clean_titles) < 3:
-        for entry in feed.entries:
-            title = entry.title.split(" - ")[0].strip()
-            if title not in clean_titles:
-                clean_titles.append(title)
-            if len(clean_titles) >= 5:
-                break
-
-    return clean_titles
+    return clean_titles[:12]  # 取得最新 12 則全市場焦點新聞
 
 
-def generate_report_content(news_titles):
-    """由 Gemini 生成精簡重點分析與新聞條列"""
+def generate_deep_industry_analysis(news_titles):
+    """由 Gemini AI 進行產業歸類與精闢分析"""
     api_key = (os.environ.get("GEMINI_API_KEY") or "").strip()
     if not api_key:
         raise RuntimeError("缺少 GEMINI_API_KEY，無法呼叫 Gemini API。")
 
     client = genai.Client(api_key=api_key, vertexai=False)
     tz_tw = datetime.timezone(datetime.timedelta(hours=8))
-    today_str = datetime.datetime.now(tz_tw).strftime("%Y 年 %m 月 %d 日")
+    today_str = datetime.datetime.now(tz_tw).strftime("%Y/%m/%d")
     news_text = "\n".join([f"- {title}" for title in news_titles])
 
     prompt = f"""
-今天是 {today_str}。以下是今日最新財經頭條：
+今天是 {today_str}。以下是搜集到的最新市場即時新聞：
 {news_text}
 
-請扮演專業台股財經分析師，根據上述新聞撰寫一份【台股盤前 AI 智算晨報】。
+請扮演首席台股產業分析師，針對上述新聞進行【產業歸納】與【精闢盤勢分析】。
 
-格式要求：
-1. 第一行：圖卡核心標題（12字以內，重點摘要，例如：AI半導體領漲 關注夜盤波動）。
-2. 第二行起：圖卡內文（約 150-200 字，分析盤勢重點與操作建議，請分為 3 個重點短段落）。
-3. 第三部分：LINE 純文字訊息內容（包含開場招呼、重點新聞與分析）。
+輸出格式要求（請嚴格遵守分隔符號）：
 
-請用「===SPLIT===」將【圖卡內容】與【LINE文字訊息】分開。
+[卡片標題]
+寫出一個吸睛、專業的盤前核心主題（12字以內，如：AI與半導體領軍 族群輪動加速）。
 
-範例輸出：
-AI強勢領漲 聚焦台積電與夜盤
-昨日美股強勁反彈，台積電ADR大漲帶動市場信心。
-AI伺服器供應鏈獲利動能明確，盤中留意大盤成交量變化。
-操作上建議逢低布局核心權值股，嚴格設好停損。
+[產業分類與焦點新聞]
+請將新聞歸類為 3-4 個主要產業別（例如：【半導體/晶圓代工】、【AI伺服器/散熱】、【車用/光電】、【金融/傳產】），每個產業別列出 1-2 點關鍵摘要（每點 20 字以內，精準寫出重點）。
+
+[AI精闢分析]
+撰寫 150 字左右的精闢分析，包含：
+1. 市場資金流向與利多/利空解讀
+2. 今日觀察族群與盤前操作策略
+
 ===SPLIT===
-📊 【AI 智算台股盤前晨報】
+
+[LINE推播內容]
+撰寫一份適合手機閱讀的 LINE 格式訊息，包含開場、產業分類亮點、AI 深度剖析與祝語。
+
+範例輸出形式：
+AI與半導體領頭 聚焦夜盤連動
+【半導體/先進封裝】台積電法說帶勁，設備股接續吸金。
+【AI伺服器/散熱】美股AI巨頭走強，散熱族群營收亮眼。
+【金融/傳產】外資回補金融股，重電題材持續發酵。
+市場焦點集中於AI供應鏈，夜盤與美股ADR表現強勁，帶動台股開高預期。操作上建議順應資金流向，佈局展望明確的權值與績優中小型股，嚴格落實停損停利。
+===SPLIT===
+📊 【AI 智算台股產業盤前晨報】
 📅 日期：{today_str}
 
-🔥 今日核心頭條：
-1. {news_titles[0] if len(news_titles) > 0 else '焦點新聞'}
-2. {news_titles[1] if len(news_titles) > 1 else '焦點新聞'}
+🔍 【今日重點產業歸納】
+🔹 半導體/先進封裝：台積電法說帶勁，帶動設備族群
+🔹 AI伺服器/散熱：美股AI走強，伺服器供應鏈受惠
+🔹 金融/傳產：外資點火金融，政策題材帶動重電
 
-💡 盤前重點剖析：
-美股與夜盤表現強勁，AI供應鏈持續成為盤面主軸。建議投資人密切關注成交量與族群輪動。
+💡 【AI 首席分析師精闢剖析】
+今日盤面主軸依然由 AI 供應鏈與半導體領軍。夜盤與 ADR 表現亮眼給予多頭信心，操作上建議聚焦具營收支撐之績優股。
 
 祝您今日投資順利！
 """
 
     models_to_try = ["gemini-3.6-flash", "gemini-2.5-flash"]
-    
     report_raw = None
     last_error = None
 
     for model_name in models_to_try:
         try:
-            print(f"嘗試使用 Gemini 模型 [{model_name}]...")
+            print(f"嘗試使用 Gemini 模型 [{model_name}] 進行產業分析...")
             result = client.models.generate_content(
                 model=model_name,
                 contents=prompt,
@@ -100,126 +106,139 @@ AI伺服器供應鏈獲利動能明確，盤中留意大盤成交量變化。
             text = getattr(result, "text", None) or getattr(result, "output_text", None)
             if text:
                 report_raw = text
-                print(f"成功使用 [{model_name}] 生成內容！")
+                print(f"成功使用 [{model_name}] 完成分析！")
                 break
         except Exception as e:
             last_error = e
             print(f"模型 [{model_name}] 失敗: {e}")
-            continue
 
     if not report_raw:
-        raise RuntimeError(f"所有 Gemini 模型呼叫失敗，最後錯誤: {last_error}")
+        raise RuntimeError(f"Gemini API 呼叫失敗: {last_error}")
 
     parts = report_raw.split("===SPLIT===")
     card_raw = parts[0].strip()
     line_text = parts[1].strip() if len(parts) > 1 else card_raw
 
     card_lines = [l.strip() for l in card_raw.splitlines() if l.strip()]
-    card_title = card_lines[0] if card_lines else "台股盤前重點解析"
-    card_body = "\n".join(card_lines[1:]) if len(card_lines) > 1 else card_title
+    card_title = card_lines[0] if card_lines else "台股產業盤前解析"
 
-    # 清理非文字符號
+    # 分離產業歸納與 AI 分析
+    industry_sections = []
+    ai_analysis_lines = []
+    is_analysis_part = False
+
+    for line in card_lines[1:]:
+        if "市場" in line or "操作" in line or "建議" in line or "觀測" in line or len(industry_sections) >= 4:
+            is_analysis_part = True
+        
+        if is_analysis_part:
+            ai_analysis_lines.append(line)
+        else:
+            industry_sections.append(line)
+
+    industry_text = "\n".join(industry_sections)
+    ai_analysis_text = "\n".join(ai_analysis_lines)
+
     card_title = re.sub(r"[^\w\s\u4e00-\u9fa5]", "", card_title)[:14]
 
-    return card_title, card_body, line_text
+    return card_title, industry_text, ai_analysis_text, line_text
 
 
-def create_fallback_3d_template(width=1080, height=1920):
-    """預設 3D 科技感底圖"""
-    base = Image.new("RGBA", (width, height), (10, 16, 35, 255))
+def create_futuristic_3d_card(title, industry_text, ai_analysis, output_img="cover.png"):
+    """繪製手機專用、立體科技感 3D 圖卡"""
+    width, height = 1080, 1920
+
+    # 1. 建立 3D 深色科技背景
+    base = Image.new("RGBA", (width, height), (12, 18, 34, 255))
     glow = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     glow_draw = ImageDraw.Draw(glow)
-    glow_draw.ellipse([(-100, -100), (900, 900)], fill=(0, 180, 255, 45))
-    glow_draw.ellipse([(200, 1000), (1200, 2000)], fill=(120, 50, 255, 35))
-    glow = glow.filter(ImageFilter.GaussianBlur(80))
+    
+    # 3D 光暈效果
+    glow_draw.ellipse([(-150, -150), (950, 950)], fill=(0, 210, 255, 40))
+    glow_draw.ellipse([(150, 1000), (1250, 2100)], fill=(130, 60, 255, 35))
+    glow = glow.filter(ImageFilter.GaussianBlur(90))
     base = Image.alpha_composite(base, glow)
 
     draw = ImageDraw.Draw(base)
-    draw.text((90, 80), "AI 盤前極速總研", fill="#00E5FF")
-    draw.rounded_rectangle([60, 270, 1020, 1750], radius=30, fill=(15, 23, 42, 220), outline="#00E5FF", width=3)
-    return base
 
-
-def draw_3d_card(title, body_text, output_img="cover.png"):
-    """繪製高質感晨報圖卡"""
-    width, height = 1080, 1920
-    
-    template_path = "template.png"
-    if os.path.exists(template_path):
-        base = Image.open(template_path).convert("RGBA")
-        if base.size != (width, height):
-            base = base.resize((width, height), Image.Resampling.LANCZOS)
-    else:
-        base = create_fallback_3d_template(width, height)
-
-    draw = ImageDraw.Draw(base)
-    draw.rectangle([75, 410, 1005, 1620], fill=(10, 18, 38, 255))
-
+    # 2. 字型設定
     font_path = "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc"
     if not os.path.exists(font_path):
         font_path = r"C:\Windows\Fonts\msjh.ttc"
 
     try:
+        header_font = ImageFont.truetype(font_path, 42)
         title_font = ImageFont.truetype(font_path, 46)
-        body_font = ImageFont.truetype(font_path, 40)
-        sub_font = ImageFont.truetype(font_path, 30)
+        sec_title_font = ImageFont.truetype(font_path, 36)
+        content_font = ImageFont.truetype(font_path, 32)
+        sub_font = ImageFont.truetype(font_path, 28)
     except OSError:
-        title_font = body_font = sub_font = ImageFont.load_default()
+        header_font = title_font = sec_title_font = content_font = sub_font = ImageFont.load_default()
 
     tz_tw = datetime.timezone(datetime.timedelta(hours=8))
     today_str = datetime.datetime.now(tz_tw).strftime("%Y/%m/%d")
 
-    # 日期與標籤
-    draw.rectangle([210, 190, 390, 230], fill=(10, 18, 38, 255))
-    draw.text((215, 195), today_str, font=sub_font, fill="#94A3B8")
+    # 頂部 Header
+    draw.text((80, 85), "AI MARKET INTELLIGENCE", font=sub_font, fill="#00E5FF")
+    draw.text((800, 85), today_str, font=sub_font, fill="#94A3B8")
+    draw.line([(80, 130), (1000, 130)], fill=(0, 229, 255, 100), width=2)
 
-    draw.rectangle([780, 85, 980, 130], fill=(10, 18, 38, 255))
-    draw.text((785, 90), "DAILY REPORT", font=sub_font, fill="#00E5FF")
-
-    # 標題
-    draw.rectangle([150, 275, 930, 345], fill=(15, 25, 50, 255))
+    # 主標題玻璃面板 (3D Box)
+    draw.rounded_rectangle([75, 160, 1005, 270], radius=20, fill=(20, 32, 60, 230), outline="#00E5FF", width=2)
     display_title = f"【 {title} 】"
     title_bbox = draw.textbbox((0, 0), display_title, font=title_font)
     title_w = title_bbox[2] - title_bbox[0]
-    title_x = (width - title_w) // 2
-    
-    draw.text((title_x + 2, 287), display_title, font=title_font, fill="#8B6508")
-    draw.text((title_x, 285), display_title, font=title_font, fill="#FFD700")
+    draw.text(((width - title_w) // 2, 192), display_title, font=title_font, fill="#FFD700")
 
-    # 內文自動換行
-    box_x1, box_x2 = 110, 970
-    max_width = box_x2 - box_x1
+    # 區塊 1：產業分類歸納面板
+    draw.rounded_rectangle([75, 300, 1005, 1020], radius=24, fill=(16, 26, 48, 240), outline="#38BDF8", width=2)
+    draw.rectangle([100, 330, 420, 385], fill=(30, 58, 108, 255))
+    draw.text((115, 340), "🏷️ 焦點產業即時歸納", font=sec_title_font, fill="#38BDF8")
 
-    lines = []
-    for paragraph in body_text.splitlines():
+    # 繪製產業內容
+    y_idx = 410
+    for line in industry_text.splitlines():
+        if not line.strip():
+            continue
+        # 自動截斷過長文字以符合圖卡版面
+        if len(line) > 28:
+            line = line[:27] + "..."
+        draw.text((115, y_idx), line, font=content_font, fill="#F1F5F9")
+        y_idx += 68
+
+    # 區塊 2：AI 精闢分析面板
+    draw.rounded_rectangle([75, 1050, 1005, 1780], radius=24, fill=(16, 26, 48, 240), outline="#A855F7", width=2)
+    draw.rectangle([100, 1080, 420, 1135], fill=(58, 30, 108, 255))
+    draw.text((115, 1090), "🧠 AI 首席精闢剖析", font=sec_title_font, fill="#C084FC")
+
+    # 繪製 AI 精闢分析內容 (自動換行)
+    max_w = 830
+    ai_lines = []
+    for paragraph in ai_analysis.splitlines():
         if not paragraph.strip():
             continue
-        current_line = ""
-        for char in paragraph:
-            test_line = current_line + char
-            bbox = draw.textbbox((0, 0), test_line, font=body_font)
-            if bbox[2] - bbox[0] <= max_width:
-                current_line = test_line
+        cur = ""
+        for c in paragraph:
+            test = cur + c
+            bbox = draw.textbbox((0, 0), test, font=content_font)
+            if bbox[2] - bbox[0] <= max_w:
+                cur = test
             else:
-                lines.append(current_line)
-                current_line = char
-        if current_line:
-            lines.append(current_line)
-        lines.append("") # 空行分隔段落
+                ai_lines.append(cur)
+                cur = c
+        if cur:
+            ai_lines.append(cur)
 
-    y_offset = 430
-    line_height = 62
+    y_idx = 1160
+    for line in ai_lines[:9]:
+        draw.text((115, y_idx), line, font=content_font, fill="#E2E8F0")
+        y_idx += 62
 
-    for line in lines[:18]:
-        if line == "":
-            y_offset += 20
-            continue
-        draw.text((box_x1 + 2, y_offset + 2), line, font=body_font, fill="#000000")
-        draw.text((box_x1, y_offset), line, font=body_font, fill="#F8FAFC")
-        y_offset += line_height
+    # 底部標註
+    draw.text((360, 1820), "Generated by Gemini AI • 盤前智算晨報", font=sub_font, fill="#64748B")
 
     base.convert("RGB").save(output_img)
-    print(f"圖卡成功產出：{output_img}")
+    print(f"極速 3D 產業圖卡成功產出：{output_img}")
 
 
 def send_line_broadcast(line_text):
@@ -254,20 +273,20 @@ def send_line_broadcast(line_text):
 
     response = requests.post(url, headers=headers, json=payload)
     if response.status_code == 200:
-        print("LINE 圖文推播成功發送！")
+        print("LINE 產業圖文推播成功發送！")
     else:
         print(f"LINE 發送失敗：{response.status_code}, {response.text}")
 
 
 if __name__ == "__main__":
-    print("1. 抓取最新財經頭條...")
-    news = fetch_latest_stock_news()
+    print("1. 廣泛抓取最新市場新聞...")
+    news = fetch_all_market_news()
 
-    print("2. 呼叫 Gemini 生成智算晨報重點與文字...")
-    card_title, card_body, line_text = generate_report_content(news)
+    print("2. 呼叫 Gemini AI 進行產業歸類與深度剖析...")
+    card_title, industry_text, ai_analysis, line_text = generate_deep_industry_analysis(news)
 
-    print("3. 繪製 3D 視覺晨報圖卡 (cover.png)...")
-    draw_3d_card(card_title, card_body, "cover.png")
+    print("3. 繪製手機專用 3D 視覺產業圖卡 (cover.png)...")
+    create_futuristic_3d_card(card_title, industry_text, ai_analysis, "cover.png")
 
     print("4. 發送 LINE 圖文推播...")
     send_line_broadcast(line_text)
