@@ -79,7 +79,7 @@ def generate_deep_text_report(news_titles):
 直接輸出 LINE 文字內容，請確保視覺體驗乾淨俐落、圖案豐富且完全無 Markdown 符號。
 """
 
-    models_to_try = ["gemini-3.6-flash", "gemini-2.5-flash"]
+    models_to_try = ["gemini-3.6-flash"]
     report_text = None
     last_error = None
 
